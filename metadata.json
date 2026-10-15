@@ -1,0 +1,6 @@
+{
+  "name": "StreamVerse",
+  "description": "ভিডিও শেয়ারিং এবং অ্যাড ম্যানেজমেন্ট প্ল্যাটফর্ম (StreamVerse Video Sharing & Ad Management Platform)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

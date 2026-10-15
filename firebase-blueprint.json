@@ -1,0 +1,89 @@
+{
+  "entities": {
+    "Video": {
+      "title": "Video",
+      "description": "Video or Photo media record uploaded to RUHUL MIDIA",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique media ID"
+        },
+        "title": {
+          "type": "string",
+          "description": "Media title or caption",
+          "maxLength": 300
+        },
+        "url": {
+          "type": "string",
+          "description": "URL to media stream, embed, or image",
+          "maxLength": 2048
+        },
+        "type": {
+          "type": "string",
+          "enum": ["youtube", "tiktok", "facebook", "instagram", "vimeo", "dailymotion", "twitter", "direct", "image", "external"]
+        },
+        "date": {
+          "type": "string",
+          "description": "Creation date string"
+        },
+        "uploader": {
+          "type": "string",
+          "description": "Uploader display name",
+          "maxLength": 100
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["title", "url", "type"]
+    },
+    "AdSettings": {
+      "title": "AdSettings",
+      "description": "Platform advertising banner configuration",
+      "type": "object",
+      "properties": {
+        "topAdEnabled": {
+          "type": "boolean"
+        },
+        "topAdCode": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "feedAdEnabled": {
+          "type": "boolean"
+        },
+        "feedAdCode": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "popunderAdEnabled": {
+          "type": "boolean"
+        },
+        "popunderAdCode": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "socialBarAdEnabled": {
+          "type": "boolean"
+        },
+        "socialBarAdCode": {
+          "type": "string",
+          "maxLength": 10000
+        }
+      },
+      "required": ["topAdEnabled", "feedAdEnabled"]
+    }
+  },
+  "firestore": {
+    "/videos/{videoId}": {
+      "schema": "Video",
+      "description": "Publicly shared videos and photos that persist forever"
+    },
+    "/settings/adSettings": {
+      "schema": "AdSettings",
+      "description": "Platform advertisement configurations"
+    }
+  }
+}

@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'ruhuaminruhulamin575@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidVideo(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() <= 300
+        && data.url is string && data.url.size() > 0 && data.url.size() <= 2048
+        && (data.type == 'youtube' || data.type == 'tiktok' || data.type == 'facebook' || data.type == 'instagram' || data.type == 'vimeo' || data.type == 'dailymotion' || data.type == 'twitter' || data.type == 'direct' || data.type == 'image' || data.type == 'external')
+        && (!('uploader' in data) || (data.uploader is string && data.uploader.size() <= 100))
+        && (!('date' in data) || (data.date is string && data.date.size() <= 50))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50))
+        && (!('thumbnailUrl' in data) || (data.thumbnailUrl is string && data.thumbnailUrl.size() <= 2048))
+        && (!('durationSeconds' in data) || (data.durationSeconds is number))
+        && (!('durationFormatted' in data) || (data.durationFormatted is string && data.durationFormatted.size() <= 30));
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Videos collection:
+    // Public read: all users see all videos/photos permanently
+    // Public create: anyone can upload
+    // Delete/Update: ONLY ADMIN CAN DELETE! Ordinary users cannot delete. Never auto-deletes.
+    match /videos/{videoId} {
+      allow read: if true;
+      allow create: if isValidId(videoId) && isValidVideo(request.resource.data);
+      allow update: if isValidId(videoId) && isAdmin() && isValidVideo(request.resource.data);
+      allow delete: if isValidId(videoId) && isAdmin();
+    }
+
+    function isValidAdSettings(data) {
+      return (!('topAdCode' in data) || data.topAdCode is string)
+        && (!('feedAdCode' in data) || data.feedAdCode is string)
+        && (!('popunderAdCode' in data) || data.popunderAdCode is string)
+        && (!('socialBarAdCode' in data) || data.socialBarAdCode is string)
+        && (!('topAdEnabled' in data) || data.topAdEnabled is bool)
+        && (!('feedAdEnabled' in data) || data.feedAdEnabled is bool)
+        && (!('popunderAdEnabled' in data) || data.popunderAdEnabled is bool)
+        && (!('socialBarAdEnabled' in data) || data.socialBarAdEnabled is bool);
+    }
+
+    function isValidRewardSettings(data) {
+      return (!('pointsPerVideoUpload' in data) || data.pointsPerVideoUpload is number)
+        && (!('pointsPerWebsiteVisit' in data) || data.pointsPerWebsiteVisit is number)
+        && (!('watchDurationSeconds' in data) || data.watchDurationSeconds is number)
+        && (!('pointsPerVideoWatch' in data) || data.pointsPerVideoWatch is number);
+    }
+
+    function isValidApiSettings(data) {
+      return (!('youtubeApiKey' in data) || data.youtubeApiKey is string);
+    }
+
+    // Global Settings (Ad Settings, Reward Settings & API Settings)
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if (settingId == 'adSettings' && isValidAdSettings(request.resource.data)) 
+                   || (settingId == 'rewardSettings' && isValidRewardSettings(request.resource.data))
+                   || (settingId == 'apiSettings' && isValidApiSettings(request.resource.data))
+                   || isAdmin();
+    }
+
+    // Admin authorization document
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // User Wallets & Points
+    match /wallets/{walletId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Users & Live Presence Tracking
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Withdrawal Requests
+    match /withdrawals/{withdrawalId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if true;
+    }
+  }
+}

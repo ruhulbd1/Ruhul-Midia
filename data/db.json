@@ -1,0 +1,89 @@
+{
+  "videos": [
+    {
+      "id": "1791342891154",
+      "title": "Hin",
+      "url": "https://youtu.be/39JcLiUzSrQ",
+      "type": "youtube",
+      "date": "2026-10-07",
+      "uploader": "RUHUL MIDIA"
+    },
+    {
+      "id": "1",
+      "title": "Beautiful Nature & Scenic Video (প্রাকৃতিক দৃশ্য)",
+      "url": "https://www.youtube.com/watch?v=LXb3EKWsInQ",
+      "type": "youtube",
+      "date": "2026-10-01",
+      "uploader": "RUHUL MIDIA"
+    },
+    {
+      "id": "2",
+      "title": "সুন্দর সবুজ প্রকৃতি ও নদী (Natural Green Horizon)",
+      "url": "https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?w=1200&auto=format&fit=crop&q=80",
+      "type": "image",
+      "date": "2026-10-03",
+      "uploader": "RUHUL MIDIA"
+    },
+    {
+      "id": "3",
+      "title": "সূর্যাস্তের সোনালী আভা (Golden Sunset Landscape)",
+      "url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1200&auto=format&fit=crop&q=80",
+      "type": "image",
+      "date": "2026-10-04",
+      "uploader": "রুহুল আমিন"
+    }
+  ],
+  "adSettings": {
+    "topAdEnabled": false,
+    "topAdCode": "",
+    "feedAdEnabled": false,
+    "feedAdCode": "",
+    "popunderAdEnabled": false,
+    "popunderAdCode": "",
+    "socialBarAdEnabled": false,
+    "socialBarAdCode": ""
+  },
+  "rewardSettings": {
+    "pointsPerVideoUpload": 10,
+    "pointsPerWebsiteVisit": 15,
+    "watchDurationSeconds": 15,
+    "pointsPerVideoWatch": 50,
+    "pointsPerBdt": 100,
+    "minWithdrawBdt": 20
+  },
+  "wallets": {
+    "IXSEQ1djNxOAufCeIwGuzy8odgi1": {
+      "userId": "IXSEQ1djNxOAufCeIwGuzy8odgi1",
+      "userName": "MD Emon",
+      "userEmail": "emonemon12222@gmail.com",
+      "points": 310,
+      "totalEarned": 310,
+      "totalWithdrawn": 0,
+      "videosWatchedCount": 6,
+      "lastActive": "2026-10-15T12:05:12.005Z"
+    },
+    "_p5t5619": {
+      "userId": "_p5t5619",
+      "userName": "ইউজার",
+      "points": 350,
+      "totalEarned": 350,
+      "totalWithdrawn": 0,
+      "videosWatchedCount": 0,
+      "lastActive": "2026-10-15T12:25:16.337Z"
+    }
+  },
+  "users": {
+    "IXSEQ1djNxOAufCeIwGuzy8odgi1": {
+      "userId": "IXSEQ1djNxOAufCeIwGuzy8odgi1",
+      "userName": "MD Emon",
+      "userEmail": "emonemon12222@gmail.com",
+      "online": false,
+      "lastSeen": "2026-10-15T12:17:17.031Z",
+      "lastActive": 1792066637031,
+      "points": 310,
+      "videosWatchedCount": 6,
+      "device": "Android Device",
+      "joinedAt": "2026-10-14T18:15:09.574Z"
+    }
+  }
+}
