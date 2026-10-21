@@ -15,53 +15,56 @@
     <meta property="og:description" content="RUHUL MIDIA হলো একটি আধুনিক ভিডিও শেয়ারিং এবং অ্যাপ প্ল্যাটফর্ম।" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <!-- Telegram WebApp SDK for Telegram Bot & Mini App Integration -->
+    <!-- Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <!-- Font Awesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <style>
-      /* Absolute override for Netlify Toolbar & Drawer Shadow Elements */
+      /* Fix scrolling issues for Mobile & Web */
+      html, body {
+        height: 100% !important;
+        max-height: 100% !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        touch-action: manipulation;
+      }
+      #root {
+        min-height: 100vh;
+        overflow-y: auto !important;
+      }
+
+      /* Hide Netlify Elements safely without breaking touch/scroll events */
       net-lify,
       netlify-drawer,
       netlify-feedback-button,
       [data-netlify-drawers],
-      iframe[src*="netlify"],
-      div[class*="netlify"],
-      div[id*="netlify"],
-      a[href*="netlify.com"] {
+      iframe[src*="netlify"] {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
         pointer-events: none !important;
-        transform: translate(-9999px, -9999px) !important;
-        position: absolute !important;
-        z-index: -99999 !important;
         width: 0 !important;
         height: 0 !important;
+        position: fixed !important;
+        top: -9999px !important;
       }
     </style>
   </head>
-  <body class="bg-slate-950 text-slate-100 min-h-screen overflow-x-hidden overflow-y-auto antialiased">
+  <body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
 
-    <!-- JavaScript to continuamente purge Netlify DOM elements -->
+    <!-- Script to clean Netlify elements from DOM -->
     <script>
       (function() {
-        function killNetlify() {
+        function removeNetlify() {
           const selectors = ['net-lify', 'netlify-drawer', 'netlify-feedback-button', '[data-netlify-drawers]'];
-          selectors.forEach(selector => {
-            document.querySelectorAll(selector).forEach(el => el.remove());
+          selectors.forEach(sel => {
+            document.querySelectorAll(sel).forEach(el => el.remove());
           });
         }
-        
-        // Immediate and interval checks
-        killNetlify();
-        const interval = setInterval(killNetlify, 300);
-        setTimeout(() => clearInterval(interval), 10000);
-
-        // Observer for ongoing updates
-        const observer = new MutationObserver(killNetlify);
+        removeNetlify();
+        const observer = new MutationObserver(removeNetlify);
         observer.observe(document.documentElement, { childList: true, subtree: true });
       })();
     </script>
