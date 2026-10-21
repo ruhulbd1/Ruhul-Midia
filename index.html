@@ -20,8 +20,23 @@
     <!-- Font Awesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <style>
-      [href*="netlify.com"], .netlify-badge, #netlify-badge {
+      /* Netlify Drawer, Badge & Overlay Hide */
+      iframe[src*="netlify"],
+      [data-netlify-drawers],
+      net-lify,
+      netlify-drawer,
+      .netlify-badge,
+      #netlify-badge,
+      div[class*="netlify"],
+      div[id*="netlify"],
+      a[href*="netlify.com"] {
         display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        max-height: 0 !important;
+        max-width: 0 !important;
+        overflow: hidden !important;
       }
     </style>
   </head>
