@@ -45,6 +45,7 @@ interface Video {
   type: VideoPlatform;
   date: string;
   uploader?: string;
+  uploaderId?: string;
   createdAt?: string;
   thumbnailUrl?: string;
   durationSeconds?: number;
@@ -143,6 +144,7 @@ export default function MobileStreamingView({
 
   // Refs for Touch Gestures and Auto-Hide Timer
   const touchStartYRef = useRef<number | null>(null);
+  const pointerStartYRef = useRef<number | null>(null);
   const controlsTimeoutRef = useRef<any>(null);
   const progressIntervalRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -160,6 +162,68 @@ export default function MobileStreamingView({
   useEffect(() => {
     isFullScreenRef.current = isFullScreen;
   }, [isFullScreen]);
+
+  // -------------------------------------------------------------
+  // WEB SCREEN WAKE LOCK API: Keep screen on while video is playing
+  // Re-enables sleep when paused or unmounted
+  // -------------------------------------------------------------
+  const wakeLockRef = useRef<any>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const requestScreenWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator && isPlaying && document.visibilityState === 'visible') {
+          if (wakeLockRef.current) {
+            try {
+              await wakeLockRef.current.release();
+            } catch {}
+          }
+          const lock = await (navigator as any).wakeLock.request('screen');
+          if (isMounted) {
+            wakeLockRef.current = lock;
+            lock.addEventListener('release', () => {
+              wakeLockRef.current = null;
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Screen WakeLock notice:', err);
+      }
+    };
+
+    const releaseScreenWakeLock = async () => {
+      if (wakeLockRef.current) {
+        try {
+          await wakeLockRef.current.release();
+        } catch {}
+        wakeLockRef.current = null;
+      }
+    };
+
+    if (isPlaying) {
+      requestScreenWakeLock();
+    } else {
+      releaseScreenWakeLock();
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isPlaying) {
+        requestScreenWakeLock();
+      } else {
+        releaseScreenWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      releaseScreenWakeLock();
+    };
+  }, [isPlaying]);
 
   // -------------------------------------------------------------
   // AUTOMATIC SCREEN ORIENTATION & FULLSCREEN DETECTION
@@ -386,7 +450,7 @@ export default function MobileStreamingView({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [currentVideo.id]);
 
-  // Touch Gesture: Swipe Down to Exit Full-Screen
+  // Touch & Pointer Gesture: Swipe Down / Drag Down to Exit Full-Screen or Minimize
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartYRef.current = e.touches[0].clientY;
   };
@@ -395,12 +459,25 @@ export default function MobileStreamingView({
     if (touchStartYRef.current === null) return;
     const touchEndY = e.changedTouches[0].clientY;
     const diff = touchEndY - touchStartYRef.current;
-    // If swiped downwards by more than 80px in full-screen mode, exit to portrait
     if (isFullScreen && diff > 80) {
       exitFullScreen();
       showToast('ফুলস্ক্রিন থেকে প্রস্থান করা হয়েছে', 'info');
     }
     touchStartYRef.current = null;
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    pointerStartYRef.current = e.clientY;
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (pointerStartYRef.current === null) return;
+    const diff = e.clientY - pointerStartYRef.current;
+    if (isFullScreen && diff > 80) {
+      exitFullScreen();
+      showToast('ফুলস্ক্রিন থেকে প্রস্থান করা হয়েছে', 'info');
+    }
+    pointerStartYRef.current = null;
   };
 
   // Actions
@@ -505,13 +582,14 @@ export default function MobileStreamingView({
     >
       
       {/* ============================================================== */}
-      {/* 1. TOP VIDEO PLAYER (Fixed 16:9 in Portrait, Edge-to-Edge in Landscape) */}
+      {/* 1. TOP VIDEO PLAYER / MINI-PLAYER VIDEO (Fixed 16:9, Edge-to-Edge in Landscape, or Mini Box) */}
       {/* ============================================================== */}
+
       <div 
         className={`relative bg-black transition-all duration-300 select-none overflow-hidden ${
           isFullScreen 
             ? 'w-full h-full flex items-center justify-center' 
-            : 'sticky top-0 z-40 w-full aspect-video shadow-2xl border-b border-slate-800'
+            : 'w-full aspect-video shadow-2xl border-b border-slate-800'
         }`}
         onMouseMove={resetControlsTimeout}
         onClick={handlePlayerAreaClick}
@@ -850,14 +928,16 @@ export default function MobileStreamingView({
           
           {/* A. Top Navigation & Close Watch Page */}
           <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
-            <button
-              type="button"
-              onClick={onCloseWatchView}
-              className="text-xs font-semibold text-slate-400 hover:text-white flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>মূল ফিডে ফিরে যান (Back to Feed)</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onCloseWatchView}
+                className="text-xs font-semibold text-slate-400 hover:text-white flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>মূল ফিডে যান (Back)</span>
+              </button>
+            </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"

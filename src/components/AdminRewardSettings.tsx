@@ -28,6 +28,7 @@ interface AdminRewardSettingsProps {
   isSaving?: boolean;
   youtubeApiKey?: string;
   onSaveYouTubeApiKey?: (key: string) => Promise<boolean>;
+  adminToken?: string;
 }
 
 export default function AdminRewardSettings({
@@ -35,7 +36,8 @@ export default function AdminRewardSettings({
   onSave,
   isSaving = false,
   youtubeApiKey = '',
-  onSaveYouTubeApiKey
+  onSaveYouTubeApiKey,
+  adminToken = ''
 }: AdminRewardSettingsProps) {
   const [formData, setFormData] = useState<RewardSettings>({
     pointsPerVideoUpload: currentSettings.pointsPerVideoUpload ?? DEFAULT_REWARD_SETTINGS.pointsPerVideoUpload,
@@ -94,7 +96,7 @@ export default function AdminRewardSettings({
       if (onSaveYouTubeApiKey) {
         await onSaveYouTubeApiKey(apiKeyInput);
       } else {
-        const token = localStorage.getItem('sv_admin_token');
+        const token = adminToken;
         await fetch('/api/youtube/settings', {
           method: 'POST',
           headers: { 

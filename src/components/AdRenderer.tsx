@@ -369,7 +369,7 @@ export function SocialBarAd({
     return (
       <aside 
         aria-label="Sponsor notification"
-        className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:max-w-md z-40 transition-all duration-300"
+        className="fixed bottom-20 left-4 right-4 sm:left-auto sm:right-6 sm:max-w-md z-40 transition-all duration-300"
       >
         <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-2 border-indigo-500/60 hover:border-indigo-400 rounded-2xl p-4 shadow-2xl backdrop-blur-md flex items-center justify-between gap-3 text-white group">
           <a
@@ -421,7 +421,7 @@ export function SocialBarAd({
   return (
     <aside 
       aria-label="Sponsor widget"
-      className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:max-w-md z-40"
+      className="fixed bottom-20 left-4 right-4 sm:left-auto sm:right-6 sm:max-w-md z-40"
     >
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-2.5 relative shadow-2xl">
         <button

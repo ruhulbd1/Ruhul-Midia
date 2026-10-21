@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   Send,
   Loader2,
-  UploadCloud
+  UploadCloud,
+  Play
 } from 'lucide-react';
 import { 
   UserWallet, 
@@ -36,17 +37,32 @@ import {
 } from '../types/earning';
 import { AdSettings } from './AdRenderer';
 
+export interface UserSubmittedVideo {
+  id: string;
+  title: string;
+  url: string;
+  type: string;
+  date: string;
+  uploader?: string;
+  uploaderId?: string;
+  thumbnailUrl?: string;
+  durationSeconds?: number;
+  durationFormatted?: string;
+}
+
 interface WalletViewProps {
   wallet: UserWallet;
   withdrawals: WithdrawalRequest[];
   adSettings: AdSettings;
   rewardSettings?: RewardSettings;
+  userVideos?: UserSubmittedVideo[];
   onNavigateToVideos: () => void;
   onRequestWithdrawal: (data: { method: PaymentMethod; accountNumber: string; amountBdt: number }) => Promise<boolean>;
   onClaimAdReward?: () => void;
   onOpenUploadModal?: () => void;
   onGoogleLogin?: () => void;
   isLoggedInGoogle?: boolean;
+  onPlayVideo?: (video: any) => void;
 }
 
 export default function WalletView({
@@ -54,12 +70,14 @@ export default function WalletView({
   withdrawals,
   adSettings,
   rewardSettings = DEFAULT_REWARD_SETTINGS,
+  userVideos = [],
   onNavigateToVideos,
   onRequestWithdrawal,
   onClaimAdReward,
   onOpenUploadModal,
   onGoogleLogin,
-  isLoggedInGoogle
+  isLoggedInGoogle,
+  onPlayVideo
 }: WalletViewProps) {
   const currentRate = rewardSettings.pointsPerBdt && rewardSettings.pointsPerBdt > 0 
     ? rewardSettings.pointsPerBdt 
@@ -650,6 +668,113 @@ export default function WalletView({
           </div>
         </div>
 
+      </div>
+
+      {/* 4. MY SUBMITTED VIDEOS / MEDIA SECTION (User Profile Videos) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+              <Tv className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-lg text-white">আমার আপলোড করা ভিডিও ও মিডিয়া (My Submitted Videos)</h3>
+                <span className="text-xs bg-indigo-500/20 text-indigo-300 font-bold px-2.5 py-0.5 rounded-full border border-indigo-500/30">
+                  {userVideos.length}টি
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                আপনার প্রোফাইল থেকে যুক্ত করা ভিডিওগুলো এখানে প্রদর্শিত হচ্ছে (ইউজার আইডি: {wallet.userId})
+              </p>
+            </div>
+          </div>
+
+          {onOpenUploadModal && (
+            <button
+              type="button"
+              onClick={onOpenUploadModal}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-indigo-600/30 cursor-pointer active:scale-95"
+            >
+              <UploadCloud className="w-4 h-4" />
+              <span>নতুন ভিডিও যুক্ত করুন</span>
+            </button>
+          )}
+        </div>
+
+        {userVideos.length === 0 ? (
+          <div className="text-center py-12 px-4 bg-slate-950/60 rounded-2xl border border-slate-800/80 space-y-3">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto">
+              <Tv className="w-7 h-7" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-white">এখনো কোনো ভিডিও সাবমিট করেননি</h4>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                আপনার পছন্দের YouTube, Facebook বা TikTok ভিডিওর লিংক যুক্ত করে ওয়ালেটে তাৎক্ষণিক বোনাস কয়েন আয় করুন!
+              </p>
+            </div>
+            {onOpenUploadModal && (
+              <button
+                type="button"
+                onClick={onOpenUploadModal}
+                className="mt-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-lg cursor-pointer"
+              >
+                প্রথম ভিডিও যুক্ত করুন
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {userVideos.map((video) => (
+              <div 
+                key={video.id}
+                className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden hover:border-indigo-500/50 transition group flex flex-col justify-between shadow-md"
+              >
+                <div className="relative aspect-video bg-black overflow-hidden">
+                  <img 
+                    src={video.thumbnailUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80'} 
+                    alt={video.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-80"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent" />
+                  <span className="absolute top-2 left-2 text-[10px] font-bold uppercase tracking-wider bg-indigo-600/90 text-white px-2 py-0.5 rounded shadow">
+                    {video.type}
+                  </span>
+                  {video.durationFormatted && (
+                    <span className="absolute bottom-2 right-2 text-[10px] font-mono bg-black/80 text-white px-1.5 py-0.5 rounded border border-white/10">
+                      {video.durationFormatted}
+                    </span>
+                  )}
+                  {onPlayVideo && (
+                    <button
+                      type="button"
+                      onClick={() => onPlayVideo(video)}
+                      className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 cursor-pointer"
+                      title="ভিডিও প্লে করুন"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/50 transform scale-90 group-hover:scale-100 transition">
+                        <Play className="w-5 h-5 fill-white ml-0.5" />
+                      </div>
+                    </button>
+                  )}
+                </div>
+
+                <div className="p-4 flex flex-col justify-between flex-1 space-y-3">
+                  <h4 className="text-xs sm:text-sm font-bold text-white line-clamp-2 leading-snug">
+                    {video.title}
+                  </h4>
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-800/80 pt-2.5">
+                    <span className="text-indigo-400 font-medium truncate max-w-[120px]">
+                      {video.uploader || wallet.userName}
+                    </span>
+                    <span className="font-mono text-slate-500">{video.date}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
     </div>

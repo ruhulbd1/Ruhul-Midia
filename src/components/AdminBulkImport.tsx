@@ -90,7 +90,7 @@ export default function AdminBulkImport({
     const cleanKey = apiKeyInput.trim();
     setIsSavingKey(true);
     try {
-      const tokenToUse = (adminToken && adminToken.trim()) ? adminToken.trim() : (localStorage.getItem('sv_admin_token') || 'RuhulMidiaAdminToken2026');
+      const tokenToUse = (adminToken && adminToken.trim()) ? adminToken.trim() : '';
       const res = await fetch('/api/youtube/settings', {
         method: 'POST',
         headers: {
@@ -133,7 +133,7 @@ export default function AdminBulkImport({
     setSelectedVideoIds(new Set());
 
     try {
-      const tokenToUse = (adminToken && adminToken.trim()) ? adminToken.trim() : (localStorage.getItem('sv_admin_token') || 'RuhulMidiaAdminToken2026');
+      const tokenToUse = (adminToken && adminToken.trim()) ? adminToken.trim() : '';
       
       // Send bulk preview request
       const res = await fetch('/api/youtube/bulk-preview', {
@@ -220,7 +220,7 @@ export default function AdminBulkImport({
     setIsImporting(true);
 
     try {
-      const tokenToUse = (adminToken && adminToken.trim()) ? adminToken.trim() : (localStorage.getItem('sv_admin_token') || 'RuhulMidiaAdminToken2026');
+      const tokenToUse = (adminToken && adminToken.trim()) ? adminToken.trim() : '';
 
       // 1. Call server bulk import endpoint
       const res = await fetch('/api/youtube/bulk-import', {

@@ -24,6 +24,7 @@ interface Video {
   type: 'youtube' | 'tiktok' | 'facebook' | 'instagram' | 'vimeo' | 'dailymotion' | 'twitter' | 'direct' | 'image' | 'external';
   date: string;
   uploader?: string;
+  uploaderId?: string;
   createdAt?: string;
   thumbnailUrl?: string;
   durationSeconds?: number;
@@ -197,39 +198,202 @@ function writeDB(data: DB) {
   }
 }
 
-// Admin Auth Helper (Simplified secure admin token verification)
+// ==============================================================
+// REAL-TIME FIREBASE FIRESTORE CROSS-PLATFORM SYNCHRONIZATION ENGINE
+// ==============================================================
+import { initializeApp as initFirebaseApp } from 'firebase/app';
+import { 
+  getFirestore as initFirestore, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  collection, 
+  getDocs, 
+  deleteDoc 
+} from 'firebase/firestore';
+
+const firebaseConfigFile = path.join(__dirname, 'firebase-applet-config.json');
+let firestoreDb: any = null;
+
+try {
+  if (fs.existsSync(firebaseConfigFile)) {
+    const rawConfig = fs.readFileSync(firebaseConfigFile, 'utf-8');
+    const firebaseConfig = JSON.parse(rawConfig);
+    const firebaseApp = initFirebaseApp(firebaseConfig, 'ruhul-midia-server-backend');
+    firestoreDb = initFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+    console.log('✅ [Server] Connected to Firebase Firestore database:', firebaseConfig.firestoreDatabaseId);
+  }
+} catch (fbErr) {
+  console.warn('⚠️ [Server] Firebase Firestore server init notice:', fbErr);
+}
+
+// 1. Sync Video to Firestore
+async function syncVideoToFirestore(video: Video) {
+  if (!firestoreDb) return;
+  try {
+    const validVideo = {
+      id: String(video.id),
+      title: String(video.title || '').substring(0, 300),
+      url: String(video.url || '').substring(0, 2048),
+      type: video.type || 'youtube',
+      date: video.date || new Date().toISOString().split('T')[0],
+      uploader: (video.uploader || 'RUHUL MIDIA').substring(0, 100),
+      uploaderId: video.uploaderId ? String(video.uploaderId).substring(0, 128) : 'server_tg',
+      createdAt: video.createdAt || new Date().toISOString(),
+      thumbnailUrl: video.thumbnailUrl || undefined,
+      durationSeconds: typeof video.durationSeconds === 'number' ? video.durationSeconds : undefined,
+      durationFormatted: video.durationFormatted || undefined
+    };
+    await setDoc(doc(firestoreDb, 'videos', String(video.id)), validVideo, { merge: true });
+    console.log(`[Firestore Sync] Video ${video.id} synced successfully`);
+  } catch (err) {
+    console.warn('[Firestore Sync] Video sync error:', err);
+  }
+}
+
+// 2. Delete Video from Firestore
+async function deleteVideoFromFirestore(videoId: string) {
+  if (!firestoreDb || !videoId) return;
+  try {
+    await deleteDoc(doc(firestoreDb, 'videos', String(videoId)));
+    console.log(`[Firestore Sync] Video ${videoId} deleted from Firestore`);
+  } catch (err) {
+    console.warn('[Firestore Sync] Video delete error:', err);
+  }
+}
+
+// 3. Sync User Wallet & Presence to Firestore
+async function syncWalletToFirestore(wallet: Wallet) {
+  if (!firestoreDb || !wallet.userId) return;
+  try {
+    await setDoc(doc(firestoreDb, 'wallets', wallet.userId), {
+      userId: wallet.userId,
+      userName: wallet.userName || 'ইউজার',
+      userEmail: wallet.userEmail || undefined,
+      points: wallet.points ?? 0,
+      totalEarned: wallet.totalEarned ?? wallet.points ?? 0,
+      totalWithdrawn: wallet.totalWithdrawn ?? 0,
+      videosWatchedCount: wallet.videosWatchedCount ?? 0,
+      lastActive: wallet.lastActive || new Date().toISOString()
+    }, { merge: true });
+
+    // Also mirror to 'users' collection so presence and user list reflects activity
+    await setDoc(doc(firestoreDb, 'users', wallet.userId), {
+      userId: wallet.userId,
+      userName: wallet.userName || 'ইউজার',
+      userEmail: wallet.userEmail || undefined,
+      online: true,
+      lastActive: Date.now(),
+      lastSeen: new Date().toLocaleTimeString('bn-BD')
+    }, { merge: true });
+    console.log(`[Firestore Sync] Wallet & User ${wallet.userId} synced to Firestore`);
+  } catch (err) {
+    console.warn('[Firestore Sync] Wallet sync error:', err);
+  }
+}
+
+// 4. Sync Withdrawal Request to Firestore
+async function syncWithdrawalToFirestore(withdrawal: Withdrawal) {
+  if (!firestoreDb || !withdrawal.id) return;
+  try {
+    await setDoc(doc(firestoreDb, 'withdrawals', withdrawal.id), withdrawal, { merge: true });
+    console.log(`[Firestore Sync] Withdrawal ${withdrawal.id} synced to Firestore`);
+  } catch (err) {
+    console.warn('[Firestore Sync] Withdrawal sync error:', err);
+  }
+}
+
+// 5. Sync Settings to Firestore
+async function syncSettingsToFirestore(adSettings?: AdSettings, rewardSettings?: RewardSettings) {
+  if (!firestoreDb) return;
+  try {
+    if (adSettings) {
+      await setDoc(doc(firestoreDb, 'settings', 'adSettings'), adSettings, { merge: true });
+    }
+    if (rewardSettings) {
+      await setDoc(doc(firestoreDb, 'settings', 'rewardSettings'), rewardSettings, { merge: true });
+    }
+  } catch (err) {
+    console.warn('[Firestore Sync] Settings sync error:', err);
+  }
+}
+
+// 6. Startup Bidirectional Reconciliation between Firestore and local DB
+async function reconcileFirestoreStartup() {
+  if (!firestoreDb) return;
+  try {
+    const db = readDB();
+    // Fetch remote videos
+    const videosSnap = await getDocs(collection(firestoreDb, 'videos'));
+    if (!videosSnap.empty) {
+      const firestoreVideos: Video[] = [];
+      videosSnap.forEach(d => {
+        const v = d.data() as Video;
+        if (v && v.id && v.url) {
+          firestoreVideos.push({ ...v, id: d.id });
+        }
+      });
+      if (firestoreVideos.length > 0) {
+        const map = new Map<string, Video>();
+        firestoreVideos.forEach(v => map.set(v.id, v));
+        db.videos.forEach(v => {
+          if (!map.has(v.id)) {
+            map.set(v.id, v);
+            // Push missing local video to Firestore
+            syncVideoToFirestore(v);
+          }
+        });
+        db.videos = Array.from(map.values()).sort((a, b) => b.id.localeCompare(a.id));
+        writeDB(db);
+        console.log(`✅ [Firestore Sync] Reconciled ${db.videos.length} videos from Firestore`);
+      }
+    } else if (db.videos.length > 0) {
+      // Seed Firestore with local db.videos
+      for (const v of db.videos) {
+        await syncVideoToFirestore(v);
+      }
+      console.log(`✅ [Firestore Sync] Seeded ${db.videos.length} videos into Firestore`);
+    }
+
+    // Settings sync
+    const rewardDoc = await getDoc(doc(firestoreDb, 'settings', 'rewardSettings'));
+    if (rewardDoc.exists()) {
+      db.rewardSettings = rewardDoc.data() as RewardSettings;
+      writeDB(db);
+    } else if (db.rewardSettings) {
+      await syncSettingsToFirestore(undefined, db.rewardSettings);
+    }
+  } catch (err) {
+    console.warn('⚠️ [Firestore Sync] Initial reconciliation note:', err);
+  }
+}
+
+// Strict Admin Auth Helper: Mandatory authentication & token validation
 const ADMIN_TOKEN = 'RuhulMidiaAdminToken2026';
 
 function verifyAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization || '';
-  // Check valid token or allow admin testing in preview/dashboard
-  if (
-    authHeader === `Bearer ${ADMIN_TOKEN}` || 
-    authHeader.startsWith('Bearer') || 
-    !authHeader || 
-    req.headers['x-admin-role'] === 'admin'
-  ) {
+  if (authHeader === `Bearer ${ADMIN_TOKEN}`) {
     return next();
   }
-  return res.status(401).json({ error: 'অননুমোদিত অ্যাক্সেস (Unauthorized Access)' });
+  return res.status(401).json({ error: 'অননুমোদিত অ্যাক্সেস: সঠিক এডমিন টোকেন আবশ্যক (Unauthorized Access: Valid Admin Token Required)' });
 }
 
-// Relaxed Admin Check for Bulk Import (Allows seamless testing in preview/app while UI remains admin-only)
+// Strict Admin Check for Bulk Import
 function verifyBulkAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
-  // Always permit bulk operations when accessed from the admin dashboard
-  return next();
+  return verifyAdmin(req, res, next);
 }
 
 // --- API ROUTES ---
 
-// 1. Admin Login
+// 1. Admin Login (Strict password validation against ruhulamin0)
 app.post('/api/admin/login', (req, res) => {
-  const { username, password } = req.body;
-  // Use specified login credentials: (ruhul / ruhulamin1)
-  if (username === 'ruhul' && password === 'ruhulamin1') {
+  const { password } = req.body;
+  // Strict admin password check: ruhulamin0
+  if (password === 'ruhulamin0') {
     res.json({ token: ADMIN_TOKEN, success: true });
   } else {
-    res.status(401).json({ success: false, error: 'ইউজারনাম বা পাসওয়ার্ড ভুল হয়েছে!' });
+    res.status(401).json({ success: false, error: 'ভুল পাসওয়ার্ড! সঠিক এডমিন পাসওয়ার্ড দিন।' });
   }
 });
 
@@ -312,11 +476,13 @@ app.post('/api/videos', (req, res) => {
     type,
     date: new Date().toISOString().split('T')[0],
     uploader: typeof uploader === 'string' && uploader.trim() ? uploader.trim() : 'পাবলিক ইউজার',
+    uploaderId: typeof req.body.uploaderId === 'string' && req.body.uploaderId ? req.body.uploaderId : undefined,
     createdAt: new Date().toISOString()
   };
 
   db.videos.unshift(newVideo);
   writeDB(db);
+  syncVideoToFirestore(newVideo);
 
   res.status(201).json(newVideo);
 });
@@ -333,6 +499,7 @@ app.delete('/api/videos/:id', verifyAdmin, (req, res) => {
   }
 
   writeDB(db);
+  deleteVideoFromFirestore(id);
   res.json({ success: true, message: 'ভিডিওটি সফলভাবে মুছে ফেলা হয়েছে!' });
 });
 
@@ -378,6 +545,7 @@ app.post('/api/ads', verifyAdmin, (req, res) => {
   };
 
   writeDB(db);
+  syncSettingsToFirestore(db.adSettings, undefined);
   res.json({ success: true, adSettings: db.adSettings });
 });
 
@@ -420,6 +588,7 @@ app.post('/api/reward-settings', verifyAdmin, (req, res) => {
   };
 
   writeDB(db);
+  syncSettingsToFirestore(undefined, db.rewardSettings);
   res.json({ success: true, rewardSettings: db.rewardSettings });
 });
 
@@ -475,6 +644,7 @@ app.post('/api/wallet/:userId', (req, res) => {
   };
 
   writeDB(db);
+  syncWalletToFirestore(db.wallets[userId]);
   res.json(db.wallets[userId]);
 });
 
@@ -522,10 +692,12 @@ app.post('/api/withdrawals', (req, res) => {
   if (db.wallets[userId]) {
     db.wallets[userId].points = Math.max(0, (db.wallets[userId].points || 0) - Number(points));
     db.wallets[userId].totalWithdrawn = (db.wallets[userId].totalWithdrawn || 0) + Number(amountBdt);
+    syncWalletToFirestore(db.wallets[userId]);
   }
 
   db.withdrawals.unshift(newWithdrawal);
   writeDB(db);
+  syncWithdrawalToFirestore(newWithdrawal);
 
   res.status(201).json(newWithdrawal);
 });
@@ -555,10 +727,12 @@ app.patch('/api/withdrawals/:id', verifyAdmin, (req, res) => {
     if (db.wallets[item.userId]) {
       db.wallets[item.userId].points = (db.wallets[item.userId].points || 0) + item.points;
       db.wallets[item.userId].totalWithdrawn = Math.max(0, (db.wallets[item.userId].totalWithdrawn || 0) - item.amountBdt);
+      syncWalletToFirestore(db.wallets[item.userId]);
     }
   }
 
   writeDB(db);
+  syncWithdrawalToFirestore(item);
   res.json({ success: true, withdrawal: item });
 });
 
@@ -848,6 +1022,370 @@ app.post('/api/youtube/settings', verifyAdmin, (req, res) => {
     success: true,
     hasApiKey: !!db.apiSettings.youtubeApiKey,
     youtubeApiKey: db.apiSettings.youtubeApiKey
+  });
+});
+
+// ==============================================================
+// TELEGRAM BOT & CROSS-PLATFORM REAL-TIME SYNC API
+// ==============================================================
+
+// 1. Telegram Bot Integration Status & Launch Info
+app.get('/api/telegram/info', (req, res) => {
+  const host = req.get('host') || 'localhost:3000';
+  const protocol = req.protocol || 'https';
+  const appUrl = `${protocol}://${host}`;
+
+  res.json({
+    appName: 'RUHUL MIDIA',
+    status: 'active',
+    webhookEndpoint: `${appUrl}/api/telegram/webhook`,
+    syncEndpoint: `${appUrl}/api/telegram/sync-action`,
+    webAppUrl: appUrl,
+    description: 'Cross-platform real-time sync for Telegram Bot, Android WebView APK, and Web.',
+    supportedCommands: [
+      { command: '/start', description: 'Start bot, claim welcome bonus, and open WebApp' },
+      { command: '/balance', description: 'Check real-time coin balance and BDT value' },
+      { command: '/watch', description: 'Get latest videos with reward coins' },
+      { command: '/addvideo', description: 'Add video: /addvideo Title | URL' },
+      { command: '/withdraw', description: 'Submit withdrawal: /withdraw method account points' },
+      { command: '/admin', description: 'Admin statistics (requires admin password)' }
+    ]
+  });
+});
+
+// 2. Telegram Bot Webhook Handler (Incoming updates from Telegram)
+app.post('/api/telegram/webhook', (req, res) => {
+  try {
+    const update = req.body || {};
+    const message = update.message || update.edited_message;
+    const host = req.get('host') || 'localhost:3000';
+    const protocol = req.protocol || 'https';
+    const appUrl = `${protocol}://${host}`;
+
+    if (!message || !message.text) {
+      return res.json({ ok: true, note: 'No message text to process' });
+    }
+
+    const chatId = message.chat.id;
+    const text = message.text.trim();
+    const from = message.from || {};
+    const telegramId = from.id ? String(from.id) : '';
+    const userId = telegramId ? `tg_${telegramId}` : `tg_anon_${Date.now()}`;
+    const userName = from.first_name 
+      ? `${from.first_name}${from.last_name ? ' ' + from.last_name : ''}` 
+      : (from.username || 'Telegram User');
+
+    const db = readDB();
+    db.wallets = db.wallets || {};
+
+    // Ensure user wallet exists
+    if (!db.wallets[userId]) {
+      db.wallets[userId] = {
+        userId,
+        userName,
+        userEmail: from.username ? `${from.username}@telegram.org` : undefined,
+        points: 50, // 50 Welcome bonus points
+        totalEarned: 50,
+        totalWithdrawn: 0,
+        videosWatchedCount: 0,
+        lastActive: new Date().toISOString()
+      };
+      writeDB(db);
+      syncWalletToFirestore(db.wallets[userId]);
+    }
+
+    const wallet = db.wallets[userId];
+    const pointsPerBdt = db.rewardSettings?.pointsPerBdt || 100;
+    const bdtValue = ((wallet.points || 0) / pointsPerBdt).toFixed(2);
+
+    // Command: /start
+    if (text.startsWith('/start')) {
+      syncWalletToFirestore(wallet);
+      const responsePayload = {
+        method: 'sendMessage',
+        chat_id: chatId,
+        text: `🎬 *RUHUL MIDIA তে স্বাগতম!*\n\nনমস্কার *${userName}*! আপনি ভিডিও দেখে রিয়েল-টাইমে কয়েন ও বিকাশ/নগদে টাকা উপার্জন করতে পারবেন।\n\n🎁 *স্বাগতম বোনাস:* +৫০ কয়েন যুক্ত হয়েছে!\n💰 *আপনার বর্তমান ব্যালেন্স:* ${wallet.points} কয়েন (৳${bdtValue})\n\nনিচের বাটনে চাপ দিয়ে সরাসরি ফুল-স্ক্রিন অ্যাপটি চালু করুন:`,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '🚀 RUHUL MIDIA অ্যাপ খুলুন (Open WebApp)',
+                web_app: { url: appUrl }
+              }
+            ],
+            [
+              { text: '💰 ব্যালেন্স চেক', callback_data: 'check_balance' },
+              { text: '📺 ভিডিও দেখুন', callback_data: 'watch_videos' }
+            ]
+          ]
+        }
+      };
+      return res.json(responsePayload);
+    }
+
+    // Command: /balance or /points or ব্যালেন্স
+    if (text.startsWith('/balance') || text.startsWith('/points') || text.includes('ব্যালেন্স')) {
+      syncWalletToFirestore(wallet);
+      const responsePayload = {
+        method: 'sendMessage',
+        chat_id: chatId,
+        text: `💰 *ব্যালেন্স বিবরণী (RUHUL MIDIA)*\n\n👤 ইউজার: *${userName}*\n💎 মোট কয়েন: *${wallet.points}*\n💵 আনুমানিক মূল্য: *৳${bdtValue}*\n📺 মোট ভিডিও দেখেছেন: *${wallet.videosWatchedCount} টি*\n\nউইথড্র করতে অ্যাপটি ওপেন করুন অথবা টাইপ করুন:\n\`/withdraw bkash <number> <points>\``,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '💳 ওয়ালেট ও উইথড্র অপশন',
+                web_app: { url: `${appUrl}?view=wallet` }
+              }
+            ]
+          ]
+        }
+      };
+      return res.json(responsePayload);
+    }
+
+    // Command: /watch or /videos or ভিডিও
+    if (text.startsWith('/watch') || text.startsWith('/videos') || text.includes('ভিডিও')) {
+      const latestVideos = db.videos.slice(0, 4);
+      let listText = `📺 *সর্বশেষ আপলোড করা ভিডিওসমূহ:*\n\n`;
+      latestVideos.forEach((v, idx) => {
+        listText += `${idx + 1}. *${v.title}*\n   🔗 লিংক: ${v.url}\n\n`;
+      });
+      listText += `প্রতিটি ভিডিও দেখে +${db.rewardSettings?.pointsPerVideoWatch || 50} কয়েন অর্জন করুন!`;
+
+      const responsePayload = {
+        method: 'sendMessage',
+        chat_id: chatId,
+        text: listText,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '▶️ সরাসরি ভিডিও দেখুন ও কয়েন পান',
+                web_app: { url: appUrl }
+              }
+            ]
+          ]
+        }
+      };
+      return res.json(responsePayload);
+    }
+
+    // Command: /addvideo Title | URL
+    if (text.startsWith('/addvideo')) {
+      const raw = text.replace('/addvideo', '').trim();
+      const parts = raw.split('|').map((s: string) => s.trim());
+      const title = parts[0] || 'Telegram Video';
+      const url = parts[1] || parts[0];
+
+      if (!url || !url.startsWith('http')) {
+        return res.json({
+          method: 'sendMessage',
+          chat_id: chatId,
+          text: `⚠️ অনুগ্রহ করে সঠিক ফরম্যাটে ভিডিও লিংক দিন:\n\`/addvideo টাইটেল | ভিডিও লিংক\`\n\nযেমন: \`/addvideo প্রাকৃতিক দৃশ্য | https://youtu.be/xxxx\``,
+          parse_mode: 'Markdown'
+        });
+      }
+
+      const newVideo = {
+        id: String(Date.now()),
+        title,
+        url,
+        type: (url.includes('tiktok') ? 'tiktok' : (url.includes('youtu') ? 'youtube' : 'external')) as any,
+        date: new Date().toISOString().split('T')[0],
+        uploader: userName,
+        uploaderId: userId,
+        createdAt: new Date().toISOString()
+      };
+
+      db.videos.unshift(newVideo);
+      const bonus = db.rewardSettings?.pointsPerVideoUpload || 10;
+      wallet.points += bonus;
+      wallet.totalEarned += bonus;
+      writeDB(db);
+
+      // Real-time synchronization to Firebase Firestore
+      syncVideoToFirestore(newVideo);
+      syncWalletToFirestore(wallet);
+
+      return res.json({
+        method: 'sendMessage',
+        chat_id: chatId,
+        text: `✅ *ভিডিও সফলভাবে ক্লাউড ও অ্যাপে যুক্ত হয়েছে!*\n\n📌 টাইটেল: *${title}*\n🎁 আপলোড রিওয়ার্ড: *+${bonus} কয়েন*\n💰 আপনার নতুন ব্যালেন্স: *${wallet.points} কয়েন*\n\nভিডিওটি এখন ওয়েব, APK এবং সকল ইউজারের স্ক্রিনে রিয়েল-টাইমে দেখা যাবে।`,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🎬 অ্যাপে ভিডিওটি দেখুন', web_app: { url: appUrl } }]
+          ]
+        }
+      });
+    }
+
+    // Command: /withdraw <method> <account> <points>
+    if (text.startsWith('/withdraw')) {
+      const parts = text.split(' ').filter(Boolean);
+      if (parts.length < 4) {
+        return res.json({
+          method: 'sendMessage',
+          chat_id: chatId,
+          text: `⚠️ উইথড্র রিকোয়েস্ট পাঠাতে সঠিক ফরম্যাট ব্যবহার করুন:\n\`/withdraw <মেথড> <নাম্বার> <পয়েন্ট>\`\n\nযেমন:\n\`/withdraw bkash 01712345678 500\``,
+          parse_mode: 'Markdown'
+        });
+      }
+
+      const method = parts[1].toLowerCase();
+      const accountNumber = parts[2];
+      const pointsToWithdraw = parseInt(parts[3], 10);
+
+      if (isNaN(pointsToWithdraw) || pointsToWithdraw < 100) {
+        return res.json({
+          method: 'sendMessage',
+          chat_id: chatId,
+          text: `⚠️ সর্বনিম্ন উইথড্র ১০০ point আবশ্যক। আপনার ব্যালেন্স: ${wallet.points} point।`
+        });
+      }
+
+      if (wallet.points < pointsToWithdraw) {
+        return res.json({
+          method: 'sendMessage',
+          chat_id: chatId,
+          text: `❌ পর্যাপ্ত ব্যালেন্স নেই! আপনার বর্তমান ব্যালেন্স ${wallet.points} পয়েন্ট।`
+        });
+      }
+
+      const amountBdt = Math.floor(pointsToWithdraw / pointsPerBdt);
+      db.withdrawals = db.withdrawals || [];
+      const newWithdrawal = {
+        id: `wd-${Date.now()}`,
+        userId,
+        userName,
+        method: (['bkash', 'nagad', 'rocket', 'recharge'].includes(method) ? method : 'bkash') as any,
+        accountNumber,
+        points: pointsToWithdraw,
+        amountBdt,
+        status: 'pending' as const,
+        date: new Date().toISOString().split('T')[0],
+        createdAt: new Date().toISOString()
+      };
+
+      db.withdrawals.unshift(newWithdrawal);
+      wallet.points -= pointsToWithdraw;
+      wallet.totalWithdrawn = (wallet.totalWithdrawn || 0) + amountBdt;
+      writeDB(db);
+
+      // Real-time synchronization to Firebase Firestore
+      syncWithdrawalToFirestore(newWithdrawal);
+      syncWalletToFirestore(wallet);
+
+      return res.json({
+        method: 'sendMessage',
+        chat_id: chatId,
+        text: `✅ *উইথড্র রিকোয়েস্ট জমা হয়েছে!*\n\n💳 মেথড: *${method.toUpperCase()}*\n📱 একাউন্ট: *${accountNumber}*\n💎 পয়েন্ট: *${pointsToWithdraw}* (৳${amountBdt})\n⏳ স্ট্যাটাস: *অপেক্ষমান (Pending)*\n\nএডমিন প্যানেল থেকে যাচাই করে দ্রুত পেমেন্ট পরিশোধ করা হবে।`,
+        parse_mode: 'Markdown'
+      });
+    }
+
+    // Default reply for any other message
+    return res.json({
+      method: 'sendMessage',
+      chat_id: chatId,
+      text: `নমস্কার *${userName}*! RUHUL MIDIA এর অপশনগুলো দেখতে নিচের বাটনে ক্লিক করুন:`,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🎬 RUHUL MIDIA অ্যাপ খুলুন', web_app: { url: appUrl } }]
+        ]
+      }
+    });
+
+  } catch (error) {
+    console.error('Telegram webhook error:', error);
+    return res.status(200).json({ ok: false, error: String(error) });
+  }
+});
+
+// 3. Cross-Platform Real-Time Sync Dispatcher
+app.post('/api/telegram/sync-action', (req, res) => {
+  const { action, payload } = req.body || {};
+  if (!action) {
+    return res.status(400).json({ error: 'Action type is required' });
+  }
+
+  const db = readDB();
+
+  switch (action) {
+    case 'update_balance': {
+      const { userId, pointsDelta, reason } = payload || {};
+      if (!userId || typeof pointsDelta !== 'number') {
+        return res.status(400).json({ error: 'userId and pointsDelta required' });
+      }
+      db.wallets = db.wallets || {};
+      if (!db.wallets[userId]) {
+        db.wallets[userId] = {
+          userId,
+          userName: payload?.userName || 'User',
+          points: 0,
+          totalEarned: 0,
+          totalWithdrawn: 0,
+          videosWatchedCount: 0,
+          lastActive: new Date().toISOString()
+        };
+      }
+      db.wallets[userId].points = Math.max(0, (db.wallets[userId].points || 0) + pointsDelta);
+      if (pointsDelta > 0) {
+        db.wallets[userId].totalEarned = (db.wallets[userId].totalEarned || 0) + pointsDelta;
+      }
+      db.wallets[userId].lastActive = new Date().toISOString();
+      writeDB(db);
+      syncWalletToFirestore(db.wallets[userId]);
+      return res.json({ success: true, wallet: db.wallets[userId], action, reason });
+    }
+
+    case 'add_video': {
+      const { video } = payload || {};
+      if (!video || !video.title || !video.url) {
+        return res.status(400).json({ error: 'Valid video payload required' });
+      }
+      db.videos.unshift(video);
+      writeDB(db);
+      syncVideoToFirestore(video);
+      return res.json({ success: true, video, action });
+    }
+
+    case 'get_wallet': {
+      const { userId } = payload || {};
+      const wallet = db.wallets?.[userId] || null;
+      return res.json({ success: true, wallet });
+    }
+
+    default:
+      return res.status(400).json({ error: `Unknown action: ${action}` });
+  }
+});
+
+// 4. Fetch User Sync Profile for Telegram Bot
+app.get('/api/telegram/user/:id', (req, res) => {
+  const id = req.params.id;
+  const db = readDB();
+  const userId = id.startsWith('tg_') ? id : `tg_${id}`;
+  const wallet = db.wallets?.[userId] || db.wallets?.[id] || null;
+
+  if (!wallet) {
+    return res.status(404).json({ error: 'User not found in sync database' });
+  }
+
+  res.json({
+    success: true,
+    userId: wallet.userId,
+    userName: wallet.userName,
+    points: wallet.points,
+    totalEarned: wallet.totalEarned,
+    totalWithdrawn: wallet.totalWithdrawn,
+    videosWatchedCount: wallet.videosWatchedCount,
+    lastActive: wallet.lastActive
   });
 });
 
@@ -1357,4 +1895,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 app.listen(port, '0.0.0.0', () => {
   console.log(`Server is running at http://localhost:${port}`);
+  reconcileFirestoreStartup().catch(err => {
+    console.warn('[Firestore Startup] Reconciliation error:', err);
+  });
 });

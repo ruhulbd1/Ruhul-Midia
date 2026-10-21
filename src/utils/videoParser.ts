@@ -83,6 +83,21 @@ export function getYoutubeThumbnail(videoId: string, quality: 'maxres' | 'hq' = 
     : `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
 }
 
+/**
+ * Detects whether a video is a YouTube Short, TikTok, Instagram Reel, or short-form video.
+ */
+export function isShortVideo(item: { url?: string; type?: string; durationSeconds?: number; isShort?: boolean; title?: string }): boolean {
+  if (!item) return false;
+  if (item.isShort) return true;
+  const url = (item.url || '').toLowerCase();
+  const title = (item.title || '').toLowerCase();
+  if (url.includes('/shorts/') || url.includes('/reel/') || url.includes('/reels/')) return true;
+  if (url.includes('tiktok.com') || item.type === 'tiktok') return true;
+  if (title.includes('#shorts') || title.includes('#short') || title.includes('#reels') || title.includes('shorts') || title.includes('রিলস')) return true;
+  if (item.durationSeconds && item.durationSeconds > 0 && item.durationSeconds <= 60) return true;
+  return false;
+}
+
 
 // 2. TikTok ID Extractor
 export const getTikTokId = (url: string): string => {

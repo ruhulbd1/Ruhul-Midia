@@ -1,9 +1,24 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  signOut,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence
+} from 'firebase/auth';
 import { 
   getFirestore, 
   doc, 
-  getDocFromServer 
+  getDocFromServer,
+  setDoc,
+  type DocumentReference,
+  type SetOptions
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -12,8 +27,43 @@ const app = initializeApp(firebaseConfig);
 // CRITICAL: Must pass firebaseConfig.firestoreDatabaseId to getFirestore
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+
+// Use local persistence with session and in-memory fallbacks to eliminate "missing initial state" in iframe/partitioned storage
+(async () => {
+  try {
+    await setPersistence(auth, browserLocalPersistence);
+  } catch (e1) {
+    try {
+      await setPersistence(auth, browserSessionPersistence);
+    } catch (e2) {
+      try {
+        await setPersistence(auth, inMemoryPersistence);
+      } catch (e3) {
+        console.warn('Persistence fallback note:', e3);
+      }
+    }
+  }
+})();
+
 export const googleProvider = new GoogleAuthProvider();
-export { getDocFromServer };
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
+googleProvider.addScope('email');
+googleProvider.addScope('profile');
+
+export { 
+  getDocFromServer, 
+  signInWithPopup, 
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  signOut,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence
+};
 
 export enum OperationType {
   CREATE = 'create',
@@ -60,6 +110,29 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
+}
+
+export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
+  const cleaned: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        cleaned[key] = sanitizeForFirestore(value);
+      } else {
+        cleaned[key] = value;
+      }
+    }
+  }
+  return cleaned as T;
+}
+
+export async function safeSetDoc<T extends Record<string, any>>(
+  docRef: DocumentReference,
+  data: T,
+  options?: SetOptions
+): Promise<void> {
+  const cleaned = sanitizeForFirestore(data);
+  return options ? await setDoc(docRef, cleaned, options) : await setDoc(docRef, cleaned);
 }
 
 // Initial connection test

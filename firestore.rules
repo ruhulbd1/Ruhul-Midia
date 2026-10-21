@@ -22,6 +22,7 @@ service cloud.firestore {
         && data.url is string && data.url.size() > 0 && data.url.size() <= 2048
         && (data.type == 'youtube' || data.type == 'tiktok' || data.type == 'facebook' || data.type == 'instagram' || data.type == 'vimeo' || data.type == 'dailymotion' || data.type == 'twitter' || data.type == 'direct' || data.type == 'image' || data.type == 'external')
         && (!('uploader' in data) || (data.uploader is string && data.uploader.size() <= 100))
+        && (!('uploaderId' in data) || (data.uploaderId is string && data.uploaderId.size() <= 128))
         && (!('date' in data) || (data.date is string && data.date.size() <= 50))
         && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50))
         && (!('thumbnailUrl' in data) || (data.thumbnailUrl is string && data.thumbnailUrl.size() <= 2048))
@@ -100,6 +101,42 @@ service cloud.firestore {
       allow create: if true;
       allow update: if true;
       allow delete: if true;
+    }
+
+    // Social Follows System
+    match /follows/{followId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // User Activity & Earnings Logs
+    match /activities/{activityId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // In-App Notifications
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Single-Reward Tracking per Video per Device & Account
+    match /reward_claims/{claimId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Shorts & Video Likes System
+    match /video_likes/{likeId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Shorts & Video Comments System
+    match /video_comments/{commentId} {
+      allow read: if true;
+      allow write: if true;
     }
   }
 }

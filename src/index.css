@@ -1,1 +1,65 @@
 @import "tailwindcss";
+
+@layer base {
+  html, body {
+    width: 100%;
+    min-height: 100%;
+    min-height: -webkit-fill-available;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+
+  /* Support viewport-fit=cover on notched mobile devices, Android WebView APKs, & Telegram WebApp */
+  body {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    background-color: #020617;
+    color: #f8fafc;
+  }
+
+  /* Prevent text callouts/context menus on fast taps in APK WebView */
+  input, textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Modern custom scrollbar that never clips WebView edges */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(100, 116, 139, 0.4);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 116, 139, 0.7);
+  }
+}
+
+/* Hardware Acceleration & Lag Elimination Utilities */
+.hw-accelerate {
+  will-change: transform;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Smooth Touch Momentum Scrolling */
+.smooth-scroll {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}

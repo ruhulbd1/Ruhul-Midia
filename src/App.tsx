@@ -37,7 +37,11 @@ import {
   CreditCard,
   DownloadCloud,
   AlertTriangle,
-  ShieldAlert
+  ShieldAlert,
+  Eye,
+  EyeOff,
+  Flame,
+  Film
 } from 'lucide-react';
 
 import { 
@@ -46,7 +50,8 @@ import {
   googleProvider, 
   handleFirestoreError, 
   OperationType,
-  getDocFromServer
+  getDocFromServer,
+  safeSetDoc
 } from './firebase';
 import { 
   collection, 
@@ -59,6 +64,10 @@ import {
   signInWithPopup, 
   signOut, 
   onAuthStateChanged, 
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
   type User 
 } from 'firebase/auth';
 
@@ -102,6 +111,17 @@ import WatchEarnTracker from './components/WatchEarnTracker';
 import MobileStreamingView from './components/MobileStreamingView';
 import { useUserPresence } from './hooks/useUserPresence';
 import { type UserPresence } from './types/userPresence';
+import BottomNavBar, { type NavTabType } from './components/BottomNavBar';
+import { SocialCommunityView } from './components/SocialCommunityView';
+import { UserProfileView } from './components/UserProfileView';
+import { NotificationsView } from './components/NotificationsView';
+import { AdminPasswordModal, HARDCODED_ADMIN_PASSWORD } from './components/AdminPasswordModal';
+import ShortsFeedView from './components/ShortsFeedView';
+import ShortsShelf from './components/ShortsShelf';
+import { MandatoryAuthScreen } from './components/MandatoryAuthScreen';
+import { isShortVideo } from './utils/videoParser';
+import { type FollowRelation, type UserActivity, type AppNotification } from './types/social';
+import { useTelegramAndWebView } from './hooks/useTelegramAndWebView';
 
 interface Video {
   id: string;
@@ -110,10 +130,12 @@ interface Video {
   type: VideoPlatform;
   date: string;
   uploader?: string;
+  uploaderId?: string;
   createdAt?: string;
   thumbnailUrl?: string;
   durationSeconds?: number;
   durationFormatted?: string;
+  isShort?: boolean;
 }
 
 interface Toast {
@@ -164,7 +186,7 @@ export function persistWalletState(w: UserWallet, syncRemote: boolean = true) {
   // 4. Remote cloud & server mirrors
   if (syncRemote && w.userId) {
     try {
-      setDoc(doc(db, 'wallets', w.userId), w, { merge: true }).catch(() => {});
+      safeSetDoc(doc(db, 'wallets', w.userId), w, { merge: true }).catch(() => {});
     } catch {}
     fetch(`/api/wallet/${w.userId}`, {
       method: 'POST',
@@ -287,7 +309,22 @@ function loadInitialWallet(): UserWallet {
   return initialWallet;
 }
 
+// Persistent User Session Recovery for Android WebView APK & Cross-Platform Sessions
+const getInitialCachedUser = (): User | null => {
+  try {
+    const explicitLogout = localStorage.getItem('sv_explicit_logout');
+    if (explicitLogout) return null;
+    const cached = localStorage.getItem('sv_cached_user_session');
+    if (cached) {
+      return JSON.parse(cached) as User;
+    }
+  } catch {}
+  return null;
+};
+
 export default function App() {
+  const { isTelegram, isAndroidWebView, telegramUser, triggerHaptic, showNativeOrWebToast, setupBackButton } = useTelegramAndWebView();
+
   // App state
   const [videos, setVideos] = useState<Video[]>([]);
   const [adSettings, setAdSettings] = useState<AdSettings>({
@@ -328,21 +365,99 @@ export default function App() {
   
   // Tab & Filter states
   const [activeView, setActiveView] = useState<'user' | 'wallet' | 'admin-login' | 'admin-dashboard'>('user');
-  const [videoFilter, setVideoFilter] = useState<'all' | 'youtube' | 'facebook' | 'tiktok' | 'instagram' | 'direct' | 'image'>('all');
+  const [navTab, setNavTab] = useState<NavTabType>('home');
+  const [profileTargetUserId, setProfileTargetUserId] = useState<string>('');
+  const [videoFilter, setVideoFilter] = useState<'all' | 'shorts' | 'youtube' | 'facebook' | 'tiktok' | 'instagram' | 'direct' | 'image'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [adminTab, setAdminTab] = useState<'ads' | 'videos' | 'withdrawals' | 'rewards' | 'users' | 'bulk-import'>('ads');
+
+  // Social & Follow System States
+  const [followingSet, setFollowingSet] = useState<Set<string>>(() => {
+    try {
+      const cached = localStorage.getItem('ruhul_midia_following');
+      if (cached) return new Set(JSON.parse(cached));
+    } catch {}
+    return new Set();
+  });
+  const [followerCountMap, setFollowerCountMap] = useState<Record<string, number>>({});
+  const [followingCountMap, setFollowingCountMap] = useState<Record<string, number>>({});
+  const [userActivities, setUserActivities] = useState<UserActivity[]>(() => {
+    try {
+      const cached = localStorage.getItem('ruhul_midia_activities');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [];
+  });
+  const [notifications, setNotifications] = useState<AppNotification[]>([
+    {
+      id: 'notif_welcome',
+      userId: 'all',
+      title: 'RUHUL MIDIA-তে স্বাগতম!',
+      message: 'ভিডিও দেখে কয়েন উপার্জন করুন এবং প্রোফাইল থেকে ক্যাশআউট করুন।',
+      type: 'system',
+      read: false,
+      timestamp: new Date().toISOString()
+    }
+  ]);
 
   // User Wallet State (instantly recovered from persistent storage on reload)
   const [wallet, setWallet] = useState<UserWallet>(loadInitialWallet);
 
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
 
-  // Admin Auth States
-  const ADMIN_SESSION_SECRET = 'RuhulMidiaAdminToken2026';
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [adminUser, setAdminUser] = useState('');
+  // User Auth States (Strict security: Requires valid password ruhulamin0 for admin; persistent sessions for users)
+  const [currentUser, setCurrentUser] = useState<User | null>(getInitialCachedUser);
+
+  // Telegram Bot & WebApp User Auto-Synchronization
+  useEffect(() => {
+    if (telegramUser && (!currentUser || currentUser.uid.startsWith('tg_') || currentUser.uid.startsWith('anon_') || currentUser.uid.startsWith('user_'))) {
+      const tgUserId = `tg_${telegramUser.id}`;
+      const tgUserName = telegramUser.first_name + (telegramUser.last_name ? ' ' + telegramUser.last_name : '');
+      const fakeTgUser = {
+        uid: tgUserId,
+        displayName: tgUserName,
+        email: telegramUser.username ? `${telegramUser.username}@telegram.org` : null,
+        photoURL: telegramUser.photo_url || null
+      } as unknown as User;
+
+      setCurrentUser(fakeTgUser);
+      localStorage.setItem('sv_cached_user_session', JSON.stringify({
+        uid: tgUserId,
+        displayName: tgUserName,
+        email: telegramUser.username ? `${telegramUser.username}@telegram.org` : null,
+        photoURL: telegramUser.photo_url || null
+      }));
+      localStorage.removeItem('sv_explicit_logout');
+
+      setWallet(prev => {
+        const updated = {
+          ...prev,
+          userId: tgUserId,
+          userName: tgUserName
+        };
+        persistWalletState(updated, true);
+        return updated;
+      });
+
+      // Mirror to Firestore users collection
+      try {
+        safeSetDoc(doc(db, 'users', tgUserId), {
+          userId: tgUserId,
+          userName: tgUserName,
+          userEmail: telegramUser.username ? `${telegramUser.username}@telegram.org` : undefined,
+          photoURL: telegramUser.photo_url || undefined,
+          online: true,
+          lastActive: Date.now()
+        }, { merge: true }).catch(() => {});
+      } catch {}
+    }
+  }, [telegramUser]);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [adminUser, setAdminUser] = useState('admin');
   const [adminPass, setAdminPass] = useState('');
-  const [adminToken, setAdminToken] = useState<string | null>(() => localStorage.getItem('sv_admin_token') || ADMIN_SESSION_SECRET);
+  const [showAdminPass, setShowAdminPass] = useState(false);
+  const [adminToken, setAdminToken] = useState<string | null>(null);
+  const [isAdminPasswordModalOpen, setIsAdminPasswordModalOpen] = useState<boolean>(false);
   const [loginError, setLoginError] = useState('');
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
   const [showAuthWarningModal, setShowAuthWarningModal] = useState(false);
@@ -405,12 +520,103 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    // 1. Mobile/APK/Telegram haptic feedback
+    if (type === 'success') triggerHaptic('success');
+    else if (type === 'error') triggerHaptic('error');
+    else triggerHaptic('light');
+
+    // 2. Android WebView bridge native toast (if available)
+    showNativeOrWebToast(message);
+
+    // 3. Web in-app toast
     const id = Date.now().toString();
     setToasts(prev => [...prev, { message, type, id }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4000);
   };
+
+  // Universal Back Button Handler for Android WebView APK & Telegram Mini App
+  const canGoBack = Boolean(
+    activeWatchVideo ||
+    theaterVideo ||
+    fullscreenPhoto ||
+    isUploadOpen ||
+    isAdminPasswordModalOpen ||
+    showAuthWarningModal ||
+    activeView !== 'user' ||
+    navTab !== 'home'
+  );
+
+  const handleBackNavigation = useCallback(() => {
+    // 1. If full-screen watch video is open -> close it!
+    if (activeWatchVideo) {
+      setActiveWatchVideo(null);
+      triggerHaptic('light');
+      return;
+    }
+
+    // 2. If theater modal is open -> close theater mode!
+    if (theaterVideo) {
+      setTheaterVideo(null);
+      triggerHaptic('light');
+      return;
+    }
+
+    // 4. If fullscreen photo is open -> close it!
+    if (fullscreenPhoto) {
+      setFullscreenPhoto(null);
+      triggerHaptic('light');
+      return;
+    }
+
+    // 5. If any dialog modal is open -> close the modal!
+    if (isUploadOpen) {
+      setIsUploadOpen(false);
+      triggerHaptic('light');
+      return;
+    }
+    if (isAdminPasswordModalOpen) {
+      setIsAdminPasswordModalOpen(false);
+      triggerHaptic('light');
+      return;
+    }
+    if (showAuthWarningModal) {
+      setShowAuthWarningModal(false);
+      triggerHaptic('light');
+      return;
+    }
+
+    // 6. If on wallet or admin view -> return to user feed
+    if (activeView !== 'user') {
+      setActiveView('user');
+      triggerHaptic('light');
+      return;
+    }
+
+    // 7. If on non-home tab (reels, social, notifications, profile) -> return to home feed
+    if (navTab !== 'home') {
+      setNavTab('home');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      triggerHaptic('light');
+      return;
+    }
+  }, [
+    activeWatchVideo,
+    theaterVideo,
+    fullscreenPhoto,
+    isUploadOpen,
+    isAdminPasswordModalOpen,
+    showAuthWarningModal,
+    activeView,
+    navTab,
+    triggerHaptic,
+    showToast
+  ]);
+
+  useEffect(() => {
+    return setupBackButton(canGoBack, handleBackNavigation);
+  }, [setupBackButton, canGoBack, handleBackNavigation]);
 
   // Helper to send postMessage commands to YouTube iframes - STRICTLY SCOPED to target iframe
   const sendIframeCommand = (func: 'playVideo' | 'pauseVideo', targetVideoId?: string) => {
@@ -661,18 +867,28 @@ export default function App() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  // Sync admin token state with App view & guarantee session persistence
+  // Strict Admin route guard: Redirect to admin-login if unauthorized
   useEffect(() => {
-    if (!localStorage.getItem('sv_admin_token')) {
-      localStorage.setItem('sv_admin_token', ADMIN_SESSION_SECRET);
+    if (activeView === 'admin-dashboard' && (!isAdmin || !adminToken)) {
+      setActiveView('admin-login');
+      showToast('এডমিন ড্যাশবোর্ড অ্যাক্সেস করতে অনুগ্রহ করে পাসওয়ার্ড দিয়ে লগইন করুন', 'error');
     }
-  }, []);
+  }, [activeView, isAdmin, adminToken]);
 
   useEffect(() => {
-    if (adminToken && activeView === 'admin-login') {
+    if (isAdmin && adminToken && activeView === 'admin-login') {
       setActiveView('admin-dashboard');
     }
-  }, [adminToken, activeView]);
+  }, [isAdmin, adminToken, activeView]);
+
+  // Screen Wake Lock for Theater Mode playback
+  useEffect(() => {
+    if (theaterVideo) {
+      requestWakeLock();
+    } else if (!activePlayingVideoId && !activeWatchVideo) {
+      releaseWakeLock();
+    }
+  }, [theaterVideo, activePlayingVideoId, activeWatchVideo]);
 
   // -------------------------------------------------------------
   // PERMANENT FIRESTORE CLOUD DATABASE & REAL-TIME SYNCHRONIZATION
@@ -680,6 +896,12 @@ export default function App() {
   // Only Admin is permitted to delete documents.
   // -------------------------------------------------------------
   useEffect(() => {
+    // Purge any stored admin tokens to strictly enforce password requirement on every session / refresh
+    try {
+      localStorage.removeItem('sv_admin_token');
+      sessionStorage.removeItem('sv_admin_token');
+    } catch {}
+
     // 1. Instant local storage cache restore for zero latency
     try {
       const cached = localStorage.getItem('ruhul_midia_cached_videos');
@@ -762,7 +984,7 @@ export default function App() {
                 // Seed to Firestore for permanent lifetime retention
                 for (const v of serverVideos) {
                   try {
-                    await setDoc(doc(db, 'videos', v.id), {
+                    await safeSetDoc(doc(db, 'videos', v.id), {
                       ...v,
                       createdAt: new Date().toISOString()
                     });
@@ -816,7 +1038,7 @@ export default function App() {
               socialBarAdEnabled: false,
               socialBarAdCode: ''
             };
-            setDoc(doc(db, 'settings', 'adSettings'), cleanAds).catch(() => {});
+            safeSetDoc(doc(db, 'settings', 'adSettings'), cleanAds).catch(() => {});
             setAdSettings(cleanAds);
             setTopAdEnabled(false);
             setTopAdCode('');
@@ -882,12 +1104,36 @@ export default function App() {
       }
     );
 
-    // 4. Auth State Listener for Google Admin
+    // 4. Auth State Listener (with persistent session caching for Android APK WebView)
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      if (user && user.email === 'ruhuaminruhulamin575@gmail.com') {
-        localStorage.setItem('sv_admin_token', 'RuhulMidiaAdminToken2026');
-        setAdminToken('RuhulMidiaAdminToken2026');
+      if (user) {
+        setCurrentUser(user);
+        const cachedProfile = {
+          uid: user.uid,
+          displayName: user.displayName,
+          email: user.email,
+          photoURL: user.photoURL
+        };
+        localStorage.setItem('sv_cached_user_session', JSON.stringify(cachedProfile));
+        localStorage.removeItem('sv_explicit_logout');
+      } else {
+        const explicitLogout = localStorage.getItem('sv_explicit_logout');
+        if (explicitLogout) {
+          localStorage.removeItem('sv_cached_user_session');
+          setCurrentUser(null);
+        } else if (telegramUser) {
+          // Keep Telegram session intact inside Telegram WebApp
+        } else {
+          // Persistent offline fallback for Android APK WebView
+          const cached = localStorage.getItem('sv_cached_user_session');
+          if (cached) {
+            try {
+              setCurrentUser(JSON.parse(cached));
+            } catch {
+              setCurrentUser(null);
+            }
+          }
+        }
       }
     });
 
@@ -1027,6 +1273,55 @@ export default function App() {
       }
     );
 
+    // 9. Real-time Social Follows listener
+    const unsubscribeFollows = onSnapshot(
+      collection(db, 'follows'),
+      (snapshot) => {
+        const myUid = currentUser?.uid || wallet.userId;
+        const newFollowingSet = new Set<string>();
+        const fCounts: Record<string, number> = {};
+        const fgCounts: Record<string, number> = {};
+
+        snapshot.docs.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data && data.followingId && data.followerId) {
+            if (data.followerId === myUid) {
+              newFollowingSet.add(data.followingId);
+            }
+            fCounts[data.followingId] = (fCounts[data.followingId] || 0) + 1;
+            fgCounts[data.followerId] = (fgCounts[data.followerId] || 0) + 1;
+          }
+        });
+
+        setFollowingSet(newFollowingSet);
+        setFollowerCountMap(fCounts);
+        setFollowingCountMap(fgCounts);
+        try {
+          localStorage.setItem('ruhul_midia_following', JSON.stringify(Array.from(newFollowingSet)));
+        } catch {}
+      },
+      () => {}
+    );
+
+    // 10. Real-time User Activities listener
+    const unsubscribeActivities = onSnapshot(
+      collection(db, 'activities'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const acts: UserActivity[] = snapshot.docs.map(d => ({
+            id: d.id,
+            ...(d.data() as any)
+          }));
+          acts.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setUserActivities(acts);
+          try {
+            localStorage.setItem('ruhul_midia_activities', JSON.stringify(acts.slice(0, 50)));
+          } catch {}
+        }
+      },
+      () => {}
+    );
+
     return () => {
       unsubscribeVideos();
       unsubscribeAds();
@@ -1035,8 +1330,10 @@ export default function App() {
       unsubscribeRewards();
       unsubscribeUsers();
       unsubscribeApiSettings();
+      unsubscribeFollows();
+      unsubscribeActivities();
     };
-  }, []);
+  }, [currentUser?.uid, wallet.userId]);
 
   // Manual refresh users handler
   const handleRefreshUsers = async () => {
@@ -1192,64 +1489,227 @@ export default function App() {
   // Video Search & Filter
   const filteredVideos = useMemo(() => {
     return videos.filter(v => {
-      const matchesFilter = videoFilter === 'all' || v.type === videoFilter;
+      let matchesFilter = false;
+      if (videoFilter === 'all') {
+        matchesFilter = true;
+      } else if (videoFilter === 'shorts') {
+        matchesFilter = isShortVideo(v) || v.type === 'tiktok';
+      } else {
+        matchesFilter = v.type === videoFilter;
+      }
       const matchesSearch = v.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             (v.uploader && v.uploader.toLowerCase().includes(searchQuery.toLowerCase()));
       return matchesFilter && matchesSearch;
     });
   }, [videos, videoFilter, searchQuery]);
 
-  // Admin username/password login
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Strict Admin password login (strictly validated against ruhulamin0)
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setLoginError('');
     setIsSubmittingLogin(true);
+
+    const enteredPass = adminPass.trim();
+
+    // Strict validation: password must match ruhulamin0
+    if (enteredPass !== HARDCODED_ADMIN_PASSWORD) {
+      setLoginError('ভুল পাসওয়ার্ড! এডমিন প্যানেলে প্রবেশের জন্য সঠিক পাসওয়ার্ড (ruhulamin0) দিন।');
+      showToast('ভুল এডমিন পাসওয়ার্ড! সঠিক পাসওয়ার্ড দিন।', 'error');
+      setIsSubmittingLogin(false);
+      return;
+    }
 
     try {
       const response = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: adminUser, password: adminPass })
+        body: JSON.stringify({ username: adminUser || 'admin', password: enteredPass })
       });
 
       const data = await response.json();
       if (response.ok && data.success && data.token) {
-        localStorage.setItem('sv_admin_token', data.token);
+        setIsAdmin(true);
         setAdminToken(data.token);
         setActiveView('admin-dashboard');
-        showToast('এডমিন লগইন সফল হয়েছে!', 'success');
-        setAdminUser('');
+        setIsAdminPasswordModalOpen(false);
+        showToast('এডমিন অ্যাক্সেস সফলভাবে অনুমোদিত হয়েছে!', 'success');
         setAdminPass('');
+        setLoginError('');
       } else {
-        setLoginError(data.error || 'ইউজারনাম বা পাসওয়ার্ড ভুল হয়েছে!');
-        showToast('লগইন ব্যর্থ হয়েছে!', 'error');
+        setLoginError(data.error || 'ভুল পাসওয়ার্ড! সঠিক এডমিন পাসওয়ার্ড দিন।');
+        showToast('লগইন ব্যর্থ হয়েছে! পাসওয়ার্ড সঠিক নয়।', 'error');
       }
     } catch (err) {
-      console.error(err);
-      setLoginError('সার্ভারের সাথে কানেক্ট করতে সমস্যা হয়েছে!');
+      console.warn('Network error during admin login, checking against hardcoded password:', err);
+      // Fallback check if offline or direct mode
+      if (enteredPass === HARDCODED_ADMIN_PASSWORD) {
+        const token = 'RuhulMidiaAdminToken2026';
+        setIsAdmin(true);
+        setAdminToken(token);
+        setActiveView('admin-dashboard');
+        setIsAdminPasswordModalOpen(false);
+        showToast('এডমিন অ্যাক্সেস অনুমোদিত হয়েছে!', 'success');
+        setAdminPass('');
+        setLoginError('');
+      } else {
+        setLoginError('ভুল পাসওয়ার্ড! সঠিক এডমিন পাসওয়ার্ড দিন।');
+        showToast('লগইন ব্যর্থ হয়েছে! পাসওয়ার্ড সঠিক নয়।', 'error');
+      }
     } finally {
       setIsSubmittingLogin(false);
     }
   };
 
-  // Admin Google Login
+  const handleAuthSuccess = useCallback((user: User) => {
+    setCurrentUser(user);
+    try {
+      localStorage.setItem('sv_cached_user_session', JSON.stringify({
+        uid: user.uid,
+        displayName: user.displayName,
+        email: user.email,
+        photoURL: user.photoURL
+      }));
+      localStorage.removeItem('sv_explicit_logout');
+    } catch {}
+
+    setWallet(prev => {
+      const updated = {
+        ...prev,
+        userId: user.uid,
+        userName: user.displayName || 'ইউজার',
+        userEmail: user.email || prev.userEmail
+      };
+      persistWalletState(updated, true);
+      return updated;
+    });
+
+    try {
+      safeSetDoc(doc(db, 'users', user.uid), {
+        userId: user.uid,
+        userName: user.displayName || 'ইউজার',
+        userEmail: user.email || undefined,
+        photoURL: user.photoURL || undefined,
+        online: true,
+        lastActive: Date.now()
+      }, { merge: true }).catch(() => {});
+    } catch {}
+  }, [wallet]);
+
+  // User & Admin Google Login via signInWithPopup with local storage retention and persistence fallback
   const handleGoogleLogin = async () => {
     try {
       setIsSubmittingLogin(true);
-      const res = await signInWithPopup(auth, googleProvider);
-      if (res.user) {
-        if (res.user.email === 'ruhuaminruhulamin575@gmail.com') {
-          localStorage.setItem('sv_admin_token', 'RuhulMidiaAdminToken2026');
-          setAdminToken('RuhulMidiaAdminToken2026');
-          setActiveView('admin-dashboard');
-          showToast(`স্বাগতম এডমিন (${res.user.email})! লগইন সফল হয়েছে।`, 'success');
-        } else {
-          showToast(`লগইন হয়েছে (${res.user.email})`, 'info');
+
+      // Explicitly set persistence with fallbacks to avoid missing initial state in partitioned/iframe contexts
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch {
+        try {
+          await setPersistence(auth, browserSessionPersistence);
+        } catch {
+          await setPersistence(auth, inMemoryPersistence);
         }
       }
-    } catch (err) {
+
+      // Record auth pending in localStorage for resilient session recovery
+      try {
+        localStorage.setItem('ruhul_midia_auth_in_progress', 'true');
+      } catch {}
+
+      const res = await signInWithPopup(auth, googleProvider);
+
+      try {
+        localStorage.removeItem('ruhul_midia_auth_in_progress');
+      } catch {}
+
+      if (res && res.user) {
+        // Guarantee unique Firebase user profile binding in Firestore
+        const userProfile = {
+          userId: res.user.uid,
+          userName: res.user.displayName || 'ইউজার',
+          userEmail: res.user.email || undefined,
+          photoURL: res.user.photoURL || undefined,
+          lastActive: Date.now(),
+          online: true
+        };
+        try {
+          await safeSetDoc(doc(db, 'users', res.user.uid), userProfile, { merge: true });
+        } catch {}
+
+        // Reconcile user wallet with authenticated profile
+        const boundWallet: UserWallet = {
+          ...wallet,
+          userId: res.user.uid,
+          userName: res.user.displayName || wallet.userName || 'ইউজার',
+          userEmail: res.user.email || wallet.userEmail
+        };
+        setWallet(boundWallet);
+        persistWalletState(boundWallet, true);
+
+        showToast(`স্বাগতম ${res.user.displayName || 'ইউজার'}! অ্যাকাউন্ট সফলভাবে সংযুক্ত হয়েছে।`, 'success');
+      }
+    } catch (err: any) {
       console.error('Google Sign-in error:', err);
-      showToast('গুগল লগইন বাতিল বা ব্যর্থ হয়েছে', 'error');
+      try {
+        localStorage.removeItem('ruhul_midia_auth_in_progress');
+      } catch {}
+
+      if (err?.code === 'auth/popup-closed-by-user') {
+        showToast('লগইন পপআপ উইন্ডো বন্ধ করা হয়েছে', 'info');
+      } else if (err?.code === 'auth/popup-blocked') {
+        showToast('ব্রাউজারের পপআপ ব্লকার সক্রিয় থাকায় লগইন উইন্ডো খোলেনি। ব্রাউজারে পপআপ এলাউ করুন।', 'error');
+      } else if (err?.code === 'auth/cancelled-popup-request') {
+        // Ignored
+      } else if (err?.code === 'auth/missing-initial-state' || err?.message?.includes('missing initial state')) {
+        showToast('সেশন স্টোরেজ ব্লকের কারণে সমস্যা হয়েছিল। পপআপ এলাউ করে পুনরায় চেষ্টা করুন।', 'error');
+      } else if (err?.code === 'auth/disallowed-useragent' || isAndroidWebView) {
+        // Fallback for Android WebView containers where Google OAuth popup is blocked by policy
+        const fallbackName = window.prompt('Android APK মোডে আপনার নাম লিখুন (বা ইমেইল দিন):', wallet.userName || '');
+        if (fallbackName && fallbackName.trim()) {
+          const apkUid = `apk_user_${Date.now()}`;
+          const cleanName = fallbackName.trim();
+          const isEmail = cleanName.includes('@');
+          const apkUser = {
+            uid: apkUid,
+            displayName: cleanName,
+            email: isEmail ? cleanName : null,
+            photoURL: null
+          } as unknown as User;
+
+          setCurrentUser(apkUser);
+          localStorage.setItem('sv_cached_user_session', JSON.stringify({
+            uid: apkUid,
+            displayName: cleanName,
+            email: isEmail ? cleanName : null,
+            photoURL: null
+          }));
+          localStorage.removeItem('sv_explicit_logout');
+
+          const boundWallet: UserWallet = {
+            ...wallet,
+            userId: apkUid,
+            userName: cleanName,
+            userEmail: isEmail ? cleanName : wallet.userEmail
+          };
+          setWallet(boundWallet);
+          persistWalletState(boundWallet, true);
+
+          try {
+            safeSetDoc(doc(db, 'users', apkUid), {
+              userId: apkUid,
+              userName: cleanName,
+              userEmail: isEmail ? cleanName : undefined,
+              online: true,
+              lastActive: Date.now()
+            }, { merge: true }).catch(() => {});
+          } catch {}
+
+          showToast(`স্বাগতম ${cleanName}! APK সেশন সফলভাবে স্থায়ীভাবে সংযুক্ত হয়েছে।`, 'success');
+          return;
+        }
+      } else {
+        showToast('গুগল লগইন সম্পন্ন করতে সমস্যা হয়েছে, পুনরায় চেষ্টা করুন', 'error');
+      }
     } finally {
       setIsSubmittingLogin(false);
     }
@@ -1257,11 +1717,17 @@ export default function App() {
 
   // Admin logout
   const handleLogout = () => {
-    localStorage.removeItem('sv_admin_token');
+    setIsAdmin(false);
     setAdminToken(null);
+    setAdminPass('');
+    setLoginError('');
+    try {
+      localStorage.removeItem('sv_admin_token');
+      sessionStorage.removeItem('sv_admin_token');
+    } catch {}
     signOut(auth).catch(() => {});
     setActiveView('user');
-    showToast('সফলভাবে লগআউট করা হয়েছে!', 'info');
+    showToast('এডমিন সফলভাবে লগআউট করা হয়েছে!', 'info');
   };
 
   // Save YouTube Data API v3 Key
@@ -1269,8 +1735,8 @@ export default function App() {
     try {
       const cleanKey = apiKey.trim();
       setYoutubeApiKey(cleanKey);
-      await setDoc(doc(db, 'settings', 'apiSettings'), { youtubeApiKey: cleanKey }, { merge: true });
-      const token = adminToken || localStorage.getItem('sv_admin_token');
+      await safeSetDoc(doc(db, 'settings', 'apiSettings'), { youtubeApiKey: cleanKey }, { merge: true });
+      const token = adminToken || '';
       await fetch('/api/youtube/settings', {
         method: 'POST',
         headers: { 
@@ -1367,22 +1833,34 @@ export default function App() {
       fetchedMeta?.thumbnailUrl || 
       (parsedMedia.type === 'youtube' ? getYoutubeThumbnail(getYoutubeId(newVideoUrl)) : parsedMedia.thumbnailUrl);
 
+    const isShortDetected = isShortVideo({
+      url: newVideoUrl.trim(),
+      title: newVideoTitle.trim(),
+      type: parsedMedia.type,
+      durationSeconds: fetchedMeta?.durationSeconds
+    });
+
+    const activeUploaderId = currentUser?.uid || wallet.userId;
+    const activeUploaderName = currentUser?.displayName || wallet.userName || (newVideoUploader.trim() || 'পাবলিক ইউজার');
+
     const newMediaItem: Video = {
       id: videoId,
       title: newVideoTitle.trim(),
       url: newVideoUrl.trim(),
       type: parsedMedia.type,
       date: new Date().toISOString().split('T')[0],
-      uploader: newVideoUploader.trim() || fetchedMeta?.uploader || 'পাবলিক ইউজার',
+      uploader: activeUploaderName,
+      uploaderId: activeUploaderId,
       createdAt: new Date().toISOString(),
       thumbnailUrl: finalThumbnailUrl,
       durationSeconds: fetchedMeta?.durationSeconds,
-      durationFormatted: fetchedMeta?.durationFormatted
+      durationFormatted: fetchedMeta?.durationFormatted,
+      isShort: isShortDetected
     };
 
     try {
       // 1. Save directly to Cloud Firestore (Permanent lifetime retention & instant real-time sync across all users)
-      await setDoc(doc(db, 'videos', videoId), newMediaItem);
+      await safeSetDoc(doc(db, 'videos', videoId), newMediaItem);
 
       // 2. Also send to Express backend as permanent local backup
       fetch('/api/videos', {
@@ -1392,10 +1870,12 @@ export default function App() {
           title: newMediaItem.title, 
           url: newMediaItem.url,
           uploader: newMediaItem.uploader,
+          uploaderId: newMediaItem.uploaderId,
           mediaCategory: uploadMediaType,
           thumbnailUrl: newMediaItem.thumbnailUrl,
           durationSeconds: newMediaItem.durationSeconds,
-          durationFormatted: newMediaItem.durationFormatted
+          durationFormatted: newMediaItem.durationFormatted,
+          isShort: newMediaItem.isShort
         })
       }).catch(err => console.warn('Server backup mirror note:', err));
 
@@ -1560,7 +2040,7 @@ export default function App() {
 
       // 2. Save to Cloud Firestore for permanent lifetime retention
       try {
-        await setDoc(doc(db, 'settings', 'adSettings'), newAdSettings);
+        await safeSetDoc(doc(db, 'settings', 'adSettings'), newAdSettings);
       } catch (firestoreErr) {
         console.warn('Firestore adSettings save notice:', firestoreErr);
       }
@@ -1600,7 +2080,7 @@ export default function App() {
 
       // 1. Save to Cloud Firestore for permanent real-time global sync
       try {
-        await setDoc(doc(db, 'settings', 'rewardSettings'), newSettings);
+        await safeSetDoc(doc(db, 'settings', 'rewardSettings'), newSettings);
       } catch (fErr) {
         console.warn('Firestore rewardSettings save note:', fErr);
       }
@@ -1767,7 +2247,7 @@ export default function App() {
 
     // Save withdrawal request to Firestore & Server
     try {
-      await setDoc(doc(db, 'withdrawals', id), newReq);
+      await safeSetDoc(doc(db, 'withdrawals', id), newReq);
     } catch (e) {
       console.warn('Firestore withdrawal sync note:', e);
     }
@@ -1791,7 +2271,7 @@ export default function App() {
 
     try {
       // 1. Update Firestore
-      await setDoc(doc(db, 'withdrawals', id), {
+      await safeSetDoc(doc(db, 'withdrawals', id), {
         ...item,
         status,
         note: note || item.note || ''
@@ -1809,7 +2289,7 @@ export default function App() {
               points: (uData.points || 0) + item.points,
               totalWithdrawn: Math.max(0, (uData.totalWithdrawn || 0) - item.amountBdt)
             };
-            await setDoc(userRef, refundedWallet, { merge: true });
+            await safeSetDoc(userRef, refundedWallet, { merge: true });
             if (wallet.userId === item.userId) {
               setWallet(refundedWallet);
               walletRef.current = refundedWallet;
@@ -1867,8 +2347,161 @@ export default function App() {
       .catch(() => {});
   };
 
+  // User video upload counts by uploaderId and uploader
+  const userVideoCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    videos.forEach(v => {
+      if (v.uploaderId) counts[v.uploaderId] = (counts[v.uploaderId] || 0) + 1;
+      if (v.uploader) counts[v.uploader] = (counts[v.uploader] || 0) + 1;
+    });
+    return counts;
+  }, [videos]);
+
+  // Bottom Navigation Tab change handler
+  const handleTabChange = (tab: NavTabType) => {
+    setNavTab(tab);
+    setActiveView('user');
+
+    if (tab === 'home') {
+      setVideoFilter('all');
+    } else if (tab === 'reels') {
+      setVideoFilter('shorts');
+    } else if (tab === 'profile') {
+      setProfileTargetUserId(currentUser?.uid || wallet.userId);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Follow / Unfollow handler with Firestore sync and user activity log
+  const handleFollowToggle = async (targetUser: UserPresence) => {
+    if (!targetUser || !targetUser.userId) return;
+    const myUid = currentUser?.uid || wallet.userId;
+
+    if (!currentUser) {
+      setShowAuthWarningModal(true);
+      showToast('⚠️ ফলো করতে দয়া করে Google লিংক দিয়ে লগইন করুন', 'info');
+      return;
+    }
+
+    if (targetUser.userId === myUid) {
+      showToast('আপনি নিজেকে ফলো করতে পারবেন না', 'info');
+      return;
+    }
+
+    const followDocId = `${myUid}_${targetUser.userId}`;
+    const isCurrentlyFollowing = followingSet.has(targetUser.userId);
+
+    if (isCurrentlyFollowing) {
+      // Unfollow
+      try {
+        await deleteDoc(doc(db, 'follows', followDocId));
+      } catch (err) {
+        console.warn('Unfollow firestore note:', err);
+      }
+      const updated = new Set(followingSet);
+      updated.delete(targetUser.userId);
+      setFollowingSet(updated);
+      setFollowerCountMap(prev => ({
+        ...prev,
+        [targetUser.userId]: Math.max(0, (prev[targetUser.userId] || 1) - 1)
+      }));
+      showToast(`${targetUser.userName || 'ইউজার'}-কে আনফলো করা হয়েছে`, 'info');
+    } else {
+      // Follow
+      const newRel: FollowRelation = {
+        id: followDocId,
+        followerId: myUid,
+        followerName: currentUser.displayName || wallet.userName || 'ইউজার',
+        followingId: targetUser.userId,
+        followingName: targetUser.userName || 'ইউজার',
+        createdAt: new Date().toISOString()
+      };
+      try {
+        await safeSetDoc(doc(db, 'follows', followDocId), newRel);
+      } catch (err) {
+        console.warn('Follow firestore note:', err);
+      }
+      const updated = new Set(followingSet);
+      updated.add(targetUser.userId);
+      setFollowingSet(updated);
+      setFollowerCountMap(prev => ({
+        ...prev,
+        [targetUser.userId]: (prev[targetUser.userId] || 0) + 1
+      }));
+      showToast(`🎉 ${targetUser.userName || 'ইউজার'}-কে ফলো করা হয়েছে!`, 'success');
+
+      // Log activity
+      const followAct: UserActivity = {
+        id: 'act_' + Date.now(),
+        userId: myUid,
+        type: 'follow',
+        title: `${targetUser.userName || 'ইউজার'}-কে ফলো করেছেন`,
+        timestamp: new Date().toISOString()
+      };
+      setUserActivities(prev => [followAct, ...prev]);
+      try {
+        await safeSetDoc(doc(db, 'activities', followAct.id), followAct);
+      } catch {}
+
+      // Add Notification
+      const followNotif: AppNotification = {
+        id: 'notif_' + Date.now(),
+        userId: targetUser.userId,
+        title: 'নতুন ফলোয়ার!',
+        message: `${currentUser.displayName || 'একজন ইউজার'} আপনাকে ফলো করতে শুরু করেছেন।`,
+        type: 'follow',
+        read: false,
+        timestamp: new Date().toISOString()
+      };
+      setNotifications(prev => [followNotif, ...prev]);
+      try {
+        await safeSetDoc(doc(db, 'notifications', followNotif.id), followNotif);
+      } catch {}
+    }
+  };
+
+  // Clear all notifications
+  const handleClearNotifications = () => {
+    setNotifications([]);
+    showToast('সকল বিজ্ঞপ্তি পরিষ্কার করা হয়েছে', 'info');
+  };
+
+  if (!currentUser) {
+    return (
+      <div className="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center justify-center font-sans relative overflow-x-hidden w-full">
+        {/* Toast Notifications */}
+        <div className="fixed top-20 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+          {toasts.map(t => (
+            <div 
+              key={t.id} 
+              className={`p-4 rounded-xl shadow-xl flex items-center gap-3 border transition-all duration-300 transform pointer-events-auto ${
+                t.type === 'success' 
+                  ? 'bg-emerald-950/95 border-emerald-500/40 text-emerald-300' 
+                  : t.type === 'error' 
+                    ? 'bg-rose-950/95 border-rose-500/40 text-rose-300' 
+                    : 'bg-indigo-950/95 border-indigo-500/40 text-indigo-300'
+              }`}
+            >
+              {t.type === 'success' && <CheckCircle className="w-5 h-5 shrink-0 text-emerald-400" />}
+              {t.type === 'error' && <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />}
+              {t.type === 'info' && <Info className="w-5 h-5 shrink-0 text-indigo-400" />}
+              <p className="text-sm font-medium">{t.message}</p>
+            </div>
+          ))}
+        </div>
+        <MandatoryAuthScreen
+          onAuthSuccess={handleAuthSuccess}
+          showToast={showToast}
+          isAndroidWebView={isAndroidWebView}
+          isTelegram={isTelegram}
+          telegramUser={telegramUser}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-indigo-500 selection:text-white pb-12">
+    <div className="bg-slate-950 text-slate-100 min-h-screen pb-24 flex flex-col justify-between font-sans selection:bg-indigo-500 selection:text-white relative overflow-x-hidden w-full">
       
       {/* Toast Notifications */}
       <div className="fixed top-20 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
@@ -1892,67 +2525,74 @@ export default function App() {
       </div>
 
       {/* Header / Navbar */}
-      <header className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <header className="bg-slate-900/95 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40 w-full shadow-lg">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 min-h-[4rem] flex flex-wrap items-center justify-between gap-2 w-full">
+          
+          {/* Logo / Brand */}
           <div 
-            className="flex items-center gap-3 cursor-pointer group" 
+            className="flex items-center gap-2 sm:gap-3 cursor-pointer group shrink-0" 
             onClick={() => {
               setActiveView('user');
+              setNavTab('home');
               setVideoFilter('all');
               setSearchQuery('');
             }}
           >
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 group-hover:scale-105 transition-transform duration-200">
-              <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 group-hover:scale-105 transition-transform duration-200">
+              <Play className="w-4 h-4 sm:w-5 sm:h-5 text-white fill-white ml-0.5" />
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-xl tracking-wide bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+              <span className="font-black text-lg sm:text-xl tracking-wider bg-gradient-to-r from-indigo-400 via-purple-300 to-indigo-300 bg-clip-text text-transparent">
                 RUHUL MIDIA
               </span>
-              <span className="text-[10px] text-slate-400 hidden sm:inline -mt-1 font-medium">
+              <span className="text-[10px] text-slate-400 hidden md:inline -mt-1 font-medium">
                 স্থায়ী ও রিয়েল-টাইম মিডিয়া শেয়ারিং প্ল্যাটফর্ম
               </span>
             </div>
           </div>
           
-          {/* Action Buttons in Header */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          {/* Action Buttons in Header (Flexible Wrap Container) */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
             {/* Upload Video Button */}
             <button 
+              type="button"
               onClick={() => {
                 setUploadMediaType('video');
                 setIsUploadOpen(true);
               }} 
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/20 active:scale-95 cursor-pointer"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 shadow-md shadow-indigo-600/20 active:scale-95 cursor-pointer shrink-0"
             >
-              <Plus className="w-4 h-4" />
-              <span>ভিডিও যোগ করুন</span>
+              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span>ভিডিও যোগ</span>
             </button>
 
             {/* Upload Photo Button */}
             <button 
+              type="button"
               onClick={() => {
                 setUploadMediaType('image');
                 setIsUploadOpen(true);
               }} 
-              className="bg-amber-600 hover:bg-amber-500 text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition flex items-center gap-1.5 shadow-lg shadow-amber-600/20 active:scale-95 cursor-pointer"
+              className="bg-amber-600 hover:bg-amber-500 text-white px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 active:scale-95 cursor-pointer shrink-0"
             >
-              <ImageIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">ফটো যোগ করুন</span>
-              <span className="sm:hidden">ফটো</span>
+              <ImageIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span>ফটো</span>
             </button>
 
-            {/* Wallet / Earn Button */}
+            {/* Wallet / Coin Counter Button */}
             <button 
-              onClick={() => setActiveView(activeView === 'wallet' ? 'user' : 'wallet')} 
-              className={`px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition border flex items-center gap-1.5 cursor-pointer shadow-md ${
+              type="button"
+              onClick={() => {
+                setActiveView(activeView === 'wallet' ? 'user' : 'wallet');
+              }} 
+              className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition border flex items-center gap-1.5 cursor-pointer shadow-sm shrink-0 ${
                 activeView === 'wallet' 
                   ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-amber-500/20' 
                   : 'bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 border-amber-500/40'
               }`}
             >
-              <Coins className="w-4 h-4 animate-pulse text-amber-400" />
-              <span className="hidden sm:inline">ওয়ালেট:</span>
+              <Coins className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-pulse text-amber-400" />
+              <span className="hidden xs:inline sm:inline">ওয়ালেট:</span>
               <span className="font-mono">{(wallet.points || 0).toLocaleString()}</span>
             </button>
 
@@ -1960,10 +2600,10 @@ export default function App() {
             {currentUser ? (
               <div 
                 title={`লগইন আছেন: ${currentUser.email || currentUser.displayName}`}
-                className="hidden lg:flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-3 py-2 rounded-xl text-xs font-semibold shadow-sm"
+                className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs font-semibold shadow-sm shrink-0"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="truncate max-w-[110px]">{currentUser.displayName || currentUser.email?.split('@')[0] || 'লগইন'}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <span className="truncate max-w-[80px] sm:max-w-[110px]">{currentUser.displayName?.split(' ')[0] || currentUser.email?.split('@')[0] || 'লগইন'}</span>
               </div>
             ) : (
               <button
@@ -1971,47 +2611,52 @@ export default function App() {
                 onClick={handleGoogleLogin}
                 disabled={isSubmittingLogin}
                 title="Google লিংক করে অ্যাকাউন্ট ক্রিয়েট/লগইন করুন"
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition border border-indigo-400/30 flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-900/30 shrink-0 active:scale-95"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition border border-indigo-400/30 flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-900/30 shrink-0 active:scale-95"
               >
-                <Globe className="w-3.5 h-3.5 text-indigo-200" />
+                <Globe className="w-3.5 h-3.5 text-indigo-200 shrink-0" />
                 <span>Google লিংক</span>
               </button>
             )}
 
             {/* Fullscreen Toggle Button */}
             <button
+              type="button"
               onClick={toggleFullscreen}
               title={isBrowserFullscreen ? 'ফুলস্ক্রিন বন্ধ করুন' : 'বড় স্ক্রিন (Fullscreen)'}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white p-2 rounded-xl border border-slate-700 transition cursor-pointer hidden md:flex items-center justify-center"
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white p-1.5 sm:p-2 rounded-xl border border-slate-700 transition cursor-pointer hidden md:flex items-center justify-center shrink-0"
             >
               {isBrowserFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
             
             {activeView === 'admin-dashboard' ? (
               <button 
+                type="button"
                 onClick={() => setActiveView('user')} 
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition border border-slate-700 flex items-center gap-1.5 cursor-pointer shrink-0"
               >
-                <Tv className="w-4 h-4" />
+                <Tv className="w-3.5 h-3.5" />
                 <span>ইউজার ভিউ</span>
               </button>
             ) : (
               <button 
+                type="button"
                 onClick={() => {
-                  if (adminToken) {
+                  if (isAdmin && adminToken) {
                     setActiveView('admin-dashboard');
                   } else {
-                    setActiveView('admin-login');
+                    setAdminPass('');
+                    setLoginError('');
+                    setIsAdminPasswordModalOpen(true);
                   }
                 }} 
-                className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition border flex items-center gap-1.5 cursor-pointer ${
-                  activeView === 'admin-login' 
+                className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition border flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                  activeView === 'admin-login' || isAdminPasswordModalOpen
                     ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' 
                     : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
                 }`}
               >
-                <UserCheck className="w-4 h-4" />
-                <span className="hidden sm:inline">{adminToken ? 'ড্যাশবোর্ড' : 'এডমিন'}</span>
+                <ShieldAlert className="w-3.5 h-3.5 text-indigo-400" />
+                <span>{isAdmin ? 'ড্যাশবোর্ড' : 'এডমিন'}</span>
               </button>
             )}
           </div>
@@ -2085,9 +2730,89 @@ export default function App() {
         {/* VIEW 1: USER PLATFORM SCREEN */}
         {activeView === 'user' && (
           <section className="space-y-6">
-            
-            {/* Warning Banner for Unlogged Users */}
-            {!currentUser && (
+            {navTab === 'social' ? (
+              <SocialCommunityView
+                users={registeredUsers}
+                currentUserUid={currentUser?.uid || wallet.userId}
+                isLoggedIn={!!currentUser}
+                followingSet={followingSet}
+                followerCountMap={followerCountMap}
+                userVideoCounts={userVideoCounts}
+                onFollowToggle={handleFollowToggle}
+                onViewProfile={(targetUid) => {
+                  setProfileTargetUserId(targetUid);
+                  setNavTab('profile');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onOpenLoginModal={handleGoogleLogin}
+              />
+            ) : navTab === 'profile' ? (
+              <UserProfileView
+                targetUserId={profileTargetUserId || currentUser?.uid || wallet.userId}
+                currentUserUid={currentUser?.uid || wallet.userId}
+                targetUserPresence={registeredUsers.find(u => u.userId === (profileTargetUserId || currentUser?.uid || wallet.userId))}
+                currentWallet={wallet}
+                withdrawals={withdrawals}
+                activities={userActivities}
+                allVideos={videos}
+                isLoggedIn={!!currentUser}
+                followersCount={followerCountMap[profileTargetUserId || currentUser?.uid || wallet.userId] || 0}
+                followingCount={followingCountMap[profileTargetUserId || currentUser?.uid || wallet.userId] || 0}
+                isFollowing={followingSet.has(profileTargetUserId || '')}
+                rewardSettings={rewardSettings}
+                adSettings={adSettings}
+                onFollowToggle={() => {
+                  const target = registeredUsers.find(u => u.userId === (profileTargetUserId || currentUser?.uid || wallet.userId)) || {
+                    userId: profileTargetUserId || currentUser?.uid || wallet.userId,
+                    userName: 'ইউজার'
+                  };
+                  handleFollowToggle(target as UserPresence);
+                }}
+                onBackToFeed={() => {
+                  setNavTab('home');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onOpenUploadModal={() => {
+                  setUploadMediaType('video');
+                  setIsUploadOpen(true);
+                }}
+                onPlayVideo={(video) => handleSelectAndWatchVideo(video as any)}
+                onGoogleLogin={handleGoogleLogin}
+                onRequestWithdrawal={handleRequestWithdrawal}
+                onClaimAdReward={handleClaimAdReward}
+                showToast={showToast}
+                onOpenAdminGate={() => setIsAdminPasswordModalOpen(true)}
+              />
+            ) : navTab === 'notifications' ? (
+              <NotificationsView
+                notifications={notifications}
+                onClearAll={handleClearNotifications}
+                onBackToFeed={() => {
+                  setNavTab('home');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onGoogleLogin={handleGoogleLogin}
+                isLoggedIn={!!currentUser}
+              />
+            ) : navTab === 'reels' ? (
+              <ShortsFeedView
+                videos={videos}
+                onSelectVideo={(video) => handleSelectAndWatchVideo(video)}
+                onOpenUploadModal={() => {
+                  setUploadMediaType('video');
+                  setIsUploadOpen(true);
+                }}
+                onViewProfile={(targetUid) => {
+                  setProfileTargetUserId(targetUid);
+                  setNavTab('profile');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                rewardSettings={rewardSettings}
+              />
+            ) : (
+              <>
+                {/* Warning Banner for Unlogged Users */}
+                {!currentUser && (
               <div className="bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 border border-amber-500/50 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden backdrop-blur-md">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                   <div className="flex items-start gap-3.5">
@@ -2133,6 +2858,17 @@ export default function App() {
                   }`}
                 >
                   সবগুলো ({videos.length})
+                </button>
+                <button 
+                  onClick={() => setVideoFilter('shorts')} 
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition tracking-wide whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                    videoFilter === 'shorts' 
+                      ? 'bg-red-600 text-white shadow shadow-red-600/30' 
+                      : 'bg-slate-800/70 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Flame className="w-3.5 h-3.5 text-red-400 fill-red-400" />
+                  শর্টস ({videos.filter(v => isShortVideo(v) || v.type === 'tiktok').length})
                 </button>
                 <button 
                   onClick={() => setVideoFilter('youtube')} 
@@ -2307,8 +3043,36 @@ export default function App() {
                   )}
                 </div>
               </div>
+            ) : videoFilter === 'shorts' ? (
+              <ShortsFeedView
+                videos={videos}
+                onSelectVideo={(video) => handleSelectAndWatchVideo(video)}
+                onOpenUploadModal={() => {
+                  setUploadMediaType('video');
+                  setIsUploadOpen(true);
+                }}
+                onViewProfile={(targetUid) => {
+                  setProfileTargetUserId(targetUid);
+                  setNavTab('profile');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                rewardSettings={rewardSettings}
+              />
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <>
+                {videoFilter === 'all' && !searchQuery && (
+                  <ShortsShelf
+                    videos={videos}
+                    onSelectVideo={(video) => handleSelectAndWatchVideo(video)}
+                    onViewAllShorts={() => {
+                      setNavTab('reels');
+                      setVideoFilter('shorts');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    rewardSettings={rewardSettings}
+                  />
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredVideos.map((video, index) => {
                   const media = parseUniversalMediaUrl(video.url);
                   if (!media) return null;
@@ -2479,10 +3243,22 @@ export default function App() {
                             </span>
                             
                             <div className="flex items-center gap-2 text-[11px]">
-                              <span className="text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-md flex items-center gap-1" title={`আপলোডকারী: ${video.uploader || 'পাবলিক ইউজার'}`}>
-                                <Users className="w-3 h-3 text-indigo-400" />
-                                <span className="max-w-[110px] truncate">{video.uploader || 'পাবলিক ইউজার'}</span>
-                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setProfileTargetUserId(video.uploaderId || video.uploader || '');
+                                  setNavTab('profile');
+                                  setActiveView('user');
+                                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                                }}
+                                className="text-slate-300 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/60 hover:border-indigo-500/60 px-2 py-0.5 rounded-md flex items-center gap-1 font-medium shadow-sm cursor-pointer transition active:scale-95 group/uploader" 
+                                title={`আপলোডকারী প্রোফাইল দেখুন: ${video.uploader || 'পাবলিক ইউজার'}`}
+                              >
+                                <UserCheck className="w-3 h-3 text-indigo-400 shrink-0 group-hover/uploader:scale-110 transition-transform" />
+                                <span className="text-[10px] text-slate-400">প্রোফাইল:</span>
+                                <span className="max-w-[110px] truncate text-indigo-300 font-semibold group-hover/uploader:text-indigo-200">{video.uploader || 'পাবলিক ইউজার'}</span>
+                              </button>
                               <span className="font-mono text-slate-400">{video.date}</span>
                             </div>
                           </div>
@@ -2502,7 +3278,10 @@ export default function App() {
                   );
                 })}
               </div>
+              </>
             )}
+            </>
+          )}
           </section>
         )}
  
@@ -2514,6 +3293,10 @@ export default function App() {
               withdrawals={withdrawals.filter(w => w.userId === (currentUser?.uid || wallet.userId))}
               adSettings={adSettings}
               rewardSettings={rewardSettings}
+              userVideos={videos.filter(v => 
+                (v.uploaderId && v.uploaderId === (currentUser?.uid || wallet.userId)) || 
+                (v.uploader && wallet.userName && v.uploader.toLowerCase() === wallet.userName.toLowerCase())
+              )}
               onNavigateToVideos={() => setActiveView('user')}
               onRequestWithdrawal={handleRequestWithdrawal}
               onClaimAdReward={handleClaimAdReward}
@@ -2523,6 +3306,7 @@ export default function App() {
               }}
               onGoogleLogin={handleGoogleLogin}
               isLoggedInGoogle={!!currentUser}
+              onPlayVideo={(v) => handleSelectAndWatchVideo(v as any)}
             />
           </section>
         )}
@@ -2534,65 +3318,54 @@ export default function App() {
               
               <div className="text-center space-y-2">
                 <div className="w-14 h-14 bg-indigo-500/10 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto text-2xl border border-indigo-500/20 shadow-inner">
-                  <UserCheck className="w-6 h-6 text-indigo-400" />
+                  <Lock className="w-6 h-6 text-indigo-400" />
                 </div>
-                <h2 className="text-2xl font-bold text-white">এডমিন লগইন</h2>
-                <p className="text-slate-400 text-xs">বিজ্ঞাপন নিয়ন্ত্রণ এবং কনটেন্ট ডিলিট/ম্যানেজ করতে লগইন করুন</p>
-              </div>
-
-              {/* Google Login Option */}
-              <div>
-                <button
-                  type="button"
-                  onClick={handleGoogleLogin}
-                  disabled={isSubmittingLogin}
-                  className="w-full bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-white font-medium py-2.5 px-4 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm text-sm"
-                >
-                  <Globe className="w-4 h-4 text-emerald-400" />
-                  <span>Google দিয়ে এডমিন লগইন (ruhulamin...)</span>
-                </button>
-              </div>
-
-              <div className="relative flex py-1 items-center">
-                <div className="flex-grow border-t border-slate-800"></div>
-                <span className="flex-shrink mx-4 text-slate-500 text-xs uppercase">অথবা পাসওয়ার্ড দিয়ে</span>
-                <div className="flex-grow border-t border-slate-800"></div>
+                <h2 className="text-2xl font-black text-white">এডমিন প্যানেল সিকিউরিটি</h2>
+                <p className="text-slate-400 text-xs">এডমিন ড্যাশবোর্ড, বাল্ক ইমপোর্ট ও সেটিংসে প্রবেশ করতে গোপন এডমিন পাসওয়ার্ড দিন</p>
               </div>
 
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">ইউজারনাম</label>
-                  <input 
-                    type="text" 
-                    value={adminUser}
-                    onChange={(e) => setAdminUser(e.target.value)}
-                    required 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-200 placeholder-slate-600"
-                    placeholder="ruhul"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">পাসওয়ার্ড</label>
-                  <input 
-                    type="password" 
-                    value={adminPass}
-                    onChange={(e) => setAdminPass(e.target.value)}
-                    required 
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-200 placeholder-••••••••"
-                    placeholder="••••••••"
-                  />
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+                    <span>এডমিন সিক্রেট পাসওয়ার্ড</span>
+                    <span className="text-[10px] text-emerald-400 font-mono">সুরক্ষিত</span>
+                  </label>
+                  <div className="relative">
+                    <input 
+                      type={showAdminPass ? 'text' : 'password'} 
+                      value={adminPass}
+                      onChange={(e) => {
+                        setAdminPass(e.target.value);
+                        if (loginError) setLoginError('');
+                      }}
+                      required 
+                      autoFocus
+                      autoComplete="current-password"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-3 pr-11 text-sm focus:outline-none text-slate-200 placeholder-slate-600 transition tracking-widest font-mono shadow-inner"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAdminPass(!showAdminPass)}
+                      tabIndex={-1}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 cursor-pointer"
+                      title={showAdminPass ? 'পাসওয়ার্ড লুকান' : 'পাসওয়ার্ড দেখুন'}
+                    >
+                      {showAdminPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
                 
                 {loginError && (
-                  <p className="text-rose-500 text-xs text-center font-semibold bg-rose-500/10 py-2.5 rounded-lg border border-rose-500/20">
+                  <p className="text-rose-400 text-xs text-center font-semibold bg-rose-500/10 py-2.5 px-3 rounded-xl border border-rose-500/20">
                     {loginError}
                   </p>
                 )}
 
                 <button 
                   type="submit" 
-                  disabled={isSubmittingLogin}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700 text-white font-medium py-3 rounded-xl transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer"
+                  disabled={isSubmittingLogin || !adminPass.trim()}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900/60 disabled:text-slate-500 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
                 >
                   {isSubmittingLogin ? (
                     <>
@@ -2600,8 +3373,19 @@ export default function App() {
                       <span>যাচাই হচ্ছে...</span>
                     </>
                   ) : (
-                    <span>লগইন করুন</span>
+                    <>
+                      <Lock className="w-4 h-4" />
+                      <span>এডমিন ভেরিফাই করুন</span>
+                    </>
                   )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveView('user')}
+                  className="w-full text-slate-400 hover:text-slate-200 text-xs py-2 text-center transition cursor-pointer"
+                >
+                  ← ইউজার ফিডে ফিরে যান
                 </button>
               </form>
 
@@ -2633,11 +3417,100 @@ export default function App() {
               </button>
             </div>
 
+            {/* Real-time System Metrics & User Counter Overview (Requirement 4) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Total Registered Users Counter Card */}
+              <div 
+                onClick={() => setAdminTab('users')}
+                className="bg-slate-900/90 border border-emerald-500/40 hover:border-emerald-500 rounded-2xl p-4.5 shadow-xl transition cursor-pointer group relative overflow-hidden"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">মোট নিবন্ধিত ইউজার / প্রোফাইল</span>
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center justify-center group-hover:scale-110 transition">
+                    <Users className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-white font-mono">
+                    {registeredUsers.length}
+                  </span>
+                  <span className="text-xs text-slate-400 font-semibold">টি প্রোফাইল</span>
+                </div>
+                <div className="mt-2 text-[11px] text-emerald-400 font-medium flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span>{registeredUsers.filter(u => u.online).length} জন এই মুহূর্তে লাইভ / এক্টিভ</span>
+                </div>
+              </div>
+
+              {/* Total Videos Card */}
+              <div 
+                onClick={() => setAdminTab('videos')}
+                className="bg-slate-900/90 border border-indigo-500/40 hover:border-indigo-500 rounded-2xl p-4.5 shadow-xl transition cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">মোট আপলোডকৃত মিডিয়া</span>
+                  <div className="w-9 h-9 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 flex items-center justify-center group-hover:scale-110 transition">
+                    <Tv className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-white font-mono">
+                    {videos.length}
+                  </span>
+                  <span className="text-xs text-slate-400 font-semibold">টি কনটেন্ট</span>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-400">
+                  ক্লাউড ফায়ারস্টোরে স্থায়ীভাবে সংরক্ষিত
+                </p>
+              </div>
+
+              {/* Pending Withdrawals Card */}
+              <div 
+                onClick={() => setAdminTab('withdrawals')}
+                className="bg-slate-900/90 border border-amber-500/40 hover:border-amber-500 rounded-2xl p-4.5 shadow-xl transition cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">উইথড্র রিকোয়েস্ট</span>
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center justify-center group-hover:scale-110 transition">
+                    <CreditCard className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-amber-400 font-mono">
+                    {withdrawals.filter(w => w.status === 'pending').length}
+                  </span>
+                  <span className="text-xs text-slate-400 font-semibold">টি অপেক্ষমাণ</span>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-400">
+                  মোট {withdrawals.length}টি উত্তোলনের আবেদন
+                </p>
+              </div>
+
+              {/* Security & Firebase Status Card */}
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4.5 shadow-xl flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">সার্ভার ও ক্লাউড স্ট্যাটাস</span>
+                  <div className="w-9 h-9 rounded-xl bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 flex items-center justify-center">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span>ফায়ারস্টোর ক্লাউড সিঙ্ক চালু</span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-400 truncate">
+                    সুরক্ষিত এডমিন অথেন্টিকেশন সক্রিয়
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Tab Swappers */}
-            <div className="flex gap-2 border-b border-slate-800 pb-0.5">
+            <div className="flex gap-2 border-b border-slate-800 pb-0.5 overflow-x-auto scrollbar-none">
               <button 
                 onClick={() => setAdminTab('ads')} 
-                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer ${
+                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer whitespace-nowrap ${
                   adminTab === 'ads' 
                     ? 'border-indigo-500 text-indigo-400' 
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2647,7 +3520,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setAdminTab('videos')} 
-                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer ${
+                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer whitespace-nowrap ${
                   adminTab === 'videos' 
                     ? 'border-indigo-500 text-indigo-400' 
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2657,7 +3530,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setAdminTab('withdrawals')} 
-                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer flex items-center gap-1.5 ${
+                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                   adminTab === 'withdrawals' 
                     ? 'border-indigo-500 text-indigo-400' 
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2668,7 +3541,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setAdminTab('rewards')} 
-                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer flex items-center gap-1.5 ${
+                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                   adminTab === 'rewards' 
                     ? 'border-amber-500 text-amber-400 font-bold' 
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2679,7 +3552,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setAdminTab('users')} 
-                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer flex items-center gap-1.5 ${
+                className={`py-3 px-5 text-sm font-semibold transition border-b-2 tracking-wide cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                   adminTab === 'users' 
                     ? 'border-emerald-500 text-emerald-400 font-bold' 
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2687,7 +3560,7 @@ export default function App() {
               >
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping mr-0.5" />
                 <Users className="w-4 h-4 text-emerald-400" />
-                <span>ইউজার এনালিটিক্স ও লাইভ উপস্থিতি</span>
+                <span>ইউজার প্রোফাইল (${registeredUsers.length} জন)</span>
               </button>
               <button 
                 onClick={() => setAdminTab('bulk-import')} 
@@ -3116,6 +3989,7 @@ export default function App() {
                 isSaving={isSavingRewardSettings}
                 youtubeApiKey={youtubeApiKey}
                 onSaveYouTubeApiKey={handleSaveYouTubeApiKey}
+                adminToken={adminToken || ''}
               />
             )}
 
@@ -3131,7 +4005,7 @@ export default function App() {
             {/* TAB CONTENT: BULK IMPORT CHANNEL / PLAYLIST (ADMIN ONLY) */}
             {adminTab === 'bulk-import' && (
               <AdminBulkImport
-                adminToken={adminToken || localStorage.getItem('sv_admin_token') || ''}
+                adminToken={adminToken || ''}
                 youtubeApiKey={youtubeApiKey}
                 existingVideoUrls={new Set(videos.map(v => v.url.toLowerCase()))}
                 onNavigateToSettings={() => setAdminTab('rewards')}
@@ -3399,26 +4273,29 @@ export default function App() {
         </div>
       )}
 
-      {/* MOBILE-FIRST VIDEO STREAMING VIEW (PORTRAIT & LANDSCAPE ORIENTATION - image_11 & image_12) */}
+      {/* MOBILE-FIRST VIDEO STREAMING VIEW (PORTRAIT & LANDSCAPE ORIENTATION) */}
       {activeWatchVideo && (
-        <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
-          <MobileStreamingView
-            currentVideo={activeWatchVideo}
-            allVideos={videos}
-            rewardSettings={rewardSettings}
-            isLoggedIn={!!currentUser}
-            onGoogleLogin={handleGoogleLogin}
-            onSelectVideo={(video) => {
-              handleSelectAndWatchVideo(video);
-            }}
-            onCloseWatchView={() => setActiveWatchVideo(null)}
-            onRewardGranted={handleWatchRewardGranted}
-            onOpenWallet={() => {
-              setActiveWatchVideo(null);
-              setActiveView('wallet');
-            }}
-            showToast={showToast}
-          />
+        <div className="fixed inset-0 z-40 bg-slate-950 overflow-y-auto pb-24 transition-all duration-300 pointer-events-auto">
+          <div className="w-full min-h-full pb-24">
+            <MobileStreamingView
+              currentVideo={activeWatchVideo}
+              allVideos={videos}
+              rewardSettings={rewardSettings}
+              isLoggedIn={!!currentUser}
+              onGoogleLogin={handleGoogleLogin}
+              onSelectVideo={(video) => {
+                handleSelectAndWatchVideo(video);
+              }}
+              onCloseWatchView={() => {
+                setActiveWatchVideo(null);
+              }}
+              onRewardGranted={handleWatchRewardGranted}
+              onOpenWallet={() => {
+                setActiveView('wallet');
+              }}
+              showToast={showToast}
+            />
+          </div>
         </div>
       )}
 
@@ -3697,6 +4574,20 @@ export default function App() {
         </div>
       )}
 
+      {/* SECURE ADMIN PASSWORD MODAL GATE (Strict ruhulamin0 verification) */}
+      <AdminPasswordModal
+        isOpen={isAdminPasswordModalOpen}
+        onClose={() => setIsAdminPasswordModalOpen(false)}
+        onSuccess={(token) => {
+          setIsAdmin(true);
+          setAdminToken(token);
+          setActiveView('admin-dashboard');
+          setIsAdminPasswordModalOpen(false);
+          showToast('এডমিন অ্যাক্সেস সফলভাবে অনুমোদিত হয়েছে!', 'success');
+        }}
+        showToast={showToast}
+      />
+
       {/* Floating Social Bar Ad in User View */}
       {(activeView === 'user' || activeView === 'wallet') && !!adSettings.socialBarAdEnabled && typeof adSettings.socialBarAdCode === 'string' && adSettings.socialBarAdCode.trim().length > 0 && (
         <SocialBarAd 
@@ -3704,6 +4595,16 @@ export default function App() {
           enabled={!!adSettings.socialBarAdEnabled} 
         />
       )}
+
+      {/* FIXED BOTTOM NAVIGATION BAR (Permanently visible across all screens) */}
+      <BottomNavBar
+        activeTab={navTab}
+        onChangeTab={handleTabChange}
+        unreadNotificationsCount={notifications.filter(n => !n.read).length}
+        userAvatarUrl={currentUser?.photoURL || undefined}
+        userName={currentUser?.displayName || wallet.userName}
+        isLoggedIn={!!currentUser}
+      />
 
     </div>
   );
