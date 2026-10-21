@@ -15,11 +15,10 @@ workflows:
         script: |
           npx cap add android || true
           npx cap sync android
-      - name: Set Java 17 for Gradle & Build APK
+      - name: Build Android APK
         script: |
           cd android
-          echo "org.gradle.java.home=$JAVA_HOME" >> gradle.properties
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug -Dorg.gradle.java.home=$JAVA_HOME_17
     artifacts:
       - android/app/build/outputs/apk/**/*.apk
