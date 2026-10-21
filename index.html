@@ -20,7 +20,7 @@
     <!-- Font Awesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <style>
-      /* Force hide all Netlify Inject Elements */
+      /* Absolute override for Netlify Toolbar & Drawer Shadow Elements */
       net-lify,
       netlify-drawer,
       netlify-feedback-button,
@@ -33,28 +33,37 @@
         visibility: hidden !important;
         opacity: 0 !important;
         pointer-events: none !important;
-        height: 0 !important;
-        width: 0 !important;
+        transform: translate(-9999px, -9999px) !important;
         position: absolute !important;
-        left: -9999px !important;
+        z-index: -99999 !important;
+        width: 0 !important;
+        height: 0 !important;
       }
     </style>
   </head>
   <body class="bg-slate-950 text-slate-100 min-h-screen overflow-x-hidden overflow-y-auto antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    
-    <!-- JavaScript to automatically remove Netlify Custom Elements -->
+
+    <!-- JavaScript to continuamente purge Netlify DOM elements -->
     <script>
-      const removeNetlifyElements = () => {
-        const elements = document.querySelectorAll('net-lify, netlify-drawer, netlify-feedback-button, [data-netlify-drawers]');
-        elements.forEach(el => el.remove());
-      };
-      
-      // Run immediately & periodically to remove dynamically inserted popups
-      removeNetlifyElements();
-      const observer = new MutationObserver(removeNetlifyElements);
-      observer.observe(document.documentElement, { childList: true, subtree: true });
+      (function() {
+        function killNetlify() {
+          const selectors = ['net-lify', 'netlify-drawer', 'netlify-feedback-button', '[data-netlify-drawers]'];
+          selectors.forEach(selector => {
+            document.querySelectorAll(selector).forEach(el => el.remove());
+          });
+        }
+        
+        // Immediate and interval checks
+        killNetlify();
+        const interval = setInterval(killNetlify, 300);
+        setTimeout(() => clearInterval(interval), 10000);
+
+        // Observer for ongoing updates
+        const observer = new MutationObserver(killNetlify);
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+      })();
     </script>
   </body>
 </html>
