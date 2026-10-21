@@ -18,6 +18,7 @@ workflows:
       - name: Build Android APK
         script: |
           cd android
+          export JAVA_HOME=$JAVA_HOME_17
           chmod +x gradlew
           ./gradlew assembleDebug
     artifacts:
