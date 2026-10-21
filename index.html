@@ -20,13 +20,12 @@
     <!-- Font Awesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <style>
-      /* Netlify Drawer, Badge & Overlay Hide */
-      iframe[src*="netlify"],
-      [data-netlify-drawers],
+      /* Force hide all Netlify Inject Elements */
       net-lify,
       netlify-drawer,
-      .netlify-badge,
-      #netlify-badge,
+      netlify-feedback-button,
+      [data-netlify-drawers],
+      iframe[src*="netlify"],
       div[class*="netlify"],
       div[id*="netlify"],
       a[href*="netlify.com"] {
@@ -34,14 +33,28 @@
         visibility: hidden !important;
         opacity: 0 !important;
         pointer-events: none !important;
-        max-height: 0 !important;
-        max-width: 0 !important;
-        overflow: hidden !important;
+        height: 0 !important;
+        width: 0 !important;
+        position: absolute !important;
+        left: -9999px !important;
       }
     </style>
   </head>
   <body class="bg-slate-950 text-slate-100 min-h-screen overflow-x-hidden overflow-y-auto antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- JavaScript to automatically remove Netlify Custom Elements -->
+    <script>
+      const removeNetlifyElements = () => {
+        const elements = document.querySelectorAll('net-lify, netlify-drawer, netlify-feedback-button, [data-netlify-drawers]');
+        elements.forEach(el => el.remove());
+      };
+      
+      // Run immediately & periodically to remove dynamically inserted popups
+      removeNetlifyElements();
+      const observer = new MutationObserver(removeNetlifyElements);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    </script>
   </body>
 </html>
