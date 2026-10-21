@@ -50,14 +50,25 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  // 1. Google 1-Click Sign-In
+  // 1. Google 1-Click Sign-In (Optimized for Web & Mobile APK)
   const handleGoogleSignIn = async () => {
+    // If running in Capacitor / Android WebView where embedded popups are restricted
+    const isMobileApp = isAndroidWebView || /Android|iPhone|iPad/i.test(navigator.userAgent) && window.location.href.includes('localhost');
+    
+    if (isMobileApp) {
+      handleApkDirectLogin();
+      return;
+    }
+
     try {
       setIsLoading(true);
       setErrorMessage('');
+      
       try {
         await setPersistence(auth, browserLocalPersistence);
-      } catch {}
+      } catch (pErr) {
+        console.warn('Persistence notice:', pErr);
+      }
 
       const res = await signInWithPopup(auth, googleProvider);
       if (res && res.user) {
@@ -66,10 +77,16 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
       }
     } catch (err: any) {
       console.warn('Google sign-in notice:', err);
-      if (err?.code === 'auth/popup-closed-by-user') {
+      const errCode = err?.code || '';
+      
+      if (errCode === 'auth/popup-closed-by-user') {
         setErrorMessage('লগইন পপআপ বন্ধ করা হয়েছে। পুনরায় চেষ্টা করুন।');
-      } else if (err?.code === 'auth/disallowed-useragent' || isAndroidWebView) {
-        // Fallback for Android WebView if Google restricts embedded popup
+      } else if (
+        errCode === 'auth/disallowed-useragent' || 
+        errCode.includes('missing-initial-state') ||
+        errCode.includes('storage')
+      ) {
+        // Fallback for WebView / Private mode restriction
         handleApkDirectLogin();
       } else {
         setErrorMessage('গুগল লগইন সম্পন্ন করতে সমস্যা হয়েছে। ইমেইল ও পাসওয়ার্ড দিয়ে চেষ্টা করুন।');
@@ -211,7 +228,7 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
             <span>Google দিয়ে সরাসরি প্রবেশ করুন</span>
           </button>
 
-          {/* Telegram Login Option (when in Telegram or available) */}
+          {/* Telegram Login Option */}
           {telegramUser && (
             <button
               type="button"
@@ -371,4 +388,5 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
     </div>
   );
 };
+
 export default MandatoryAuthScreen;
