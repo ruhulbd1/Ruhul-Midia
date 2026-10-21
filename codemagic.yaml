@@ -15,11 +15,13 @@ workflows:
         script: |
           npx cap add android || true
           npx cap sync android
-      - name: Force Java 17 and Build APK
+      - name: Configure Java 17 & Build APK
         script: |
           cd android
           echo "org.gradle.java.home=$JAVA_HOME" > gradle.properties
+          echo "android.useAndroidX=true" >> gradle.properties
+          sed -i '' 's/JavaVersion.VERSION_21/JavaVersion.VERSION_17/g' app/build.gradle || true
           chmod +x gradlew
-          ./gradlew assembleDebug --warning-mode all
+          ./gradlew assembleDebug
     artifacts:
       - android/app/build/outputs/apk/**/*.apk
