@@ -111,7 +111,8 @@ import WatchEarnTracker from './components/WatchEarnTracker';
 import MobileStreamingView from './components/MobileStreamingView';
 import { useUserPresence } from './hooks/useUserPresence';
 import { type UserPresence } from './types/userPresence';
-import BottomNavBar, { type NavTabType } from './components/BottomNavBar';
+import { type NavTabType } from './components/BottomNavBar';
+import TopNavBar from './components/TopNavBar';
 import { SocialCommunityView } from './components/SocialCommunityView';
 import { UserProfileView } from './components/UserProfileView';
 import { NotificationsView } from './components/NotificationsView';
@@ -119,6 +120,7 @@ import { AdminPasswordModal, HARDCODED_ADMIN_PASSWORD } from './components/Admin
 import ShortsFeedView from './components/ShortsFeedView';
 import ShortsShelf from './components/ShortsShelf';
 import { MandatoryAuthScreen } from './components/MandatoryAuthScreen';
+import SettingsModal from './components/SettingsModal';
 import { isShortVideo } from './utils/videoParser';
 import { type FollowRelation, type UserActivity, type AppNotification } from './types/social';
 import { useTelegramAndWebView } from './hooks/useTelegramAndWebView';
@@ -461,6 +463,7 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
   const [showAuthWarningModal, setShowAuthWarningModal] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
 
   // Trigger Popunder when in User or Wallet Panel
   usePopunderAd(adSettings.popunderAdEnabled, adSettings.popunderAdCode, activeView === 'user' || activeView === 'wallet');
@@ -543,6 +546,7 @@ export default function App() {
     fullscreenPhoto ||
     isUploadOpen ||
     isAdminPasswordModalOpen ||
+    isSettingsModalOpen ||
     showAuthWarningModal ||
     activeView !== 'user' ||
     navTab !== 'home'
@@ -571,6 +575,11 @@ export default function App() {
     }
 
     // 5. If any dialog modal is open -> close the modal!
+    if (isSettingsModalOpen) {
+      setIsSettingsModalOpen(false);
+      triggerHaptic('light');
+      return;
+    }
     if (isUploadOpen) {
       setIsUploadOpen(false);
       triggerHaptic('light');
@@ -607,6 +616,7 @@ export default function App() {
     fullscreenPhoto,
     isUploadOpen,
     isAdminPasswordModalOpen,
+    isSettingsModalOpen,
     showAuthWarningModal,
     activeView,
     navTab,
@@ -1513,8 +1523,8 @@ export default function App() {
 
     // Strict validation: password must match ruhulamin0
     if (enteredPass !== HARDCODED_ADMIN_PASSWORD) {
-      setLoginError('ভুল পাসওয়ার্ড! এডমিন প্যানেলে প্রবেশের জন্য সঠিক পাসওয়ার্ড (ruhulamin0) দিন।');
-      showToast('ভুল এডমিন পাসওয়ার্ড! সঠিক পাসওয়ার্ড দিন।', 'error');
+      setLoginError('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।');
+      showToast('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।', 'error');
       setIsSubmittingLogin(false);
       return;
     }
@@ -1536,8 +1546,8 @@ export default function App() {
         setAdminPass('');
         setLoginError('');
       } else {
-        setLoginError(data.error || 'ভুল পাসওয়ার্ড! সঠিক এডমিন পাসওয়ার্ড দিন।');
-        showToast('লগইন ব্যর্থ হয়েছে! পাসওয়ার্ড সঠিক নয়।', 'error');
+        setLoginError(data.error || 'ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।');
+        showToast('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।', 'error');
       }
     } catch (err) {
       console.warn('Network error during admin login, checking against hardcoded password:', err);
@@ -1552,8 +1562,8 @@ export default function App() {
         setAdminPass('');
         setLoginError('');
       } else {
-        setLoginError('ভুল পাসওয়ার্ড! সঠিক এডমিন পাসওয়ার্ড দিন।');
-        showToast('লগইন ব্যর্থ হয়েছে! পাসওয়ার্ড সঠিক নয়।', 'error');
+        setLoginError('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।');
+        showToast('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।', 'error');
       }
     } finally {
       setIsSubmittingLogin(false);
@@ -2501,10 +2511,10 @@ export default function App() {
   }
 
   return (
-    <div className="bg-slate-950 text-slate-100 min-h-screen pb-24 flex flex-col justify-between font-sans selection:bg-indigo-500 selection:text-white relative overflow-x-hidden w-full">
+    <div className="bg-slate-950 text-slate-100 min-h-screen pb-10 flex flex-col justify-between font-sans selection:bg-indigo-500 selection:text-white relative overflow-x-hidden w-full">
       
       {/* Toast Notifications */}
-      <div className="fixed top-20 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+      <div className="fixed top-24 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
         {toasts.map(t => (
           <div 
             key={t.id} 
@@ -2524,144 +2534,47 @@ export default function App() {
         ))}
       </div>
 
-      {/* Header / Navbar */}
-      <header className="bg-slate-900/95 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40 w-full shadow-lg">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 min-h-[4rem] flex flex-wrap items-center justify-between gap-2 w-full">
-          
-          {/* Logo / Brand */}
-          <div 
-            className="flex items-center gap-2 sm:gap-3 cursor-pointer group shrink-0" 
-            onClick={() => {
-              setActiveView('user');
-              setNavTab('home');
-              setVideoFilter('all');
-              setSearchQuery('');
-            }}
-          >
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 group-hover:scale-105 transition-transform duration-200">
-              <Play className="w-4 h-4 sm:w-5 sm:h-5 text-white fill-white ml-0.5" />
-            </div>
-            <div className="flex flex-col">
-              <span className="font-black text-lg sm:text-xl tracking-wider bg-gradient-to-r from-indigo-400 via-purple-300 to-indigo-300 bg-clip-text text-transparent">
-                RUHUL MIDIA
-              </span>
-              <span className="text-[10px] text-slate-400 hidden md:inline -mt-1 font-medium">
-                স্থায়ী ও রিয়েল-টাইম মিডিয়া শেয়ারিং প্ল্যাটফর্ম
-              </span>
-            </div>
-          </div>
-          
-          {/* Action Buttons in Header (Flexible Wrap Container) */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
-            {/* Upload Video Button */}
-            <button 
-              type="button"
-              onClick={() => {
-                setUploadMediaType('video');
-                setIsUploadOpen(true);
-              }} 
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 shadow-md shadow-indigo-600/20 active:scale-95 cursor-pointer shrink-0"
-            >
-              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span>ভিডিও যোগ</span>
-            </button>
-
-            {/* Upload Photo Button */}
-            <button 
-              type="button"
-              onClick={() => {
-                setUploadMediaType('image');
-                setIsUploadOpen(true);
-              }} 
-              className="bg-amber-600 hover:bg-amber-500 text-white px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 active:scale-95 cursor-pointer shrink-0"
-            >
-              <ImageIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span>ফটো</span>
-            </button>
-
-            {/* Wallet / Coin Counter Button */}
-            <button 
-              type="button"
-              onClick={() => {
-                setActiveView(activeView === 'wallet' ? 'user' : 'wallet');
-              }} 
-              className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition border flex items-center gap-1.5 cursor-pointer shadow-sm shrink-0 ${
-                activeView === 'wallet' 
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-amber-500/20' 
-                  : 'bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 border-amber-500/40'
-              }`}
-            >
-              <Coins className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-pulse text-amber-400" />
-              <span className="hidden xs:inline sm:inline">ওয়ালেট:</span>
-              <span className="font-mono">{(wallet.points || 0).toLocaleString()}</span>
-            </button>
-
-            {/* Google Link / Account Button */}
-            {currentUser ? (
-              <div 
-                title={`লগইন আছেন: ${currentUser.email || currentUser.displayName}`}
-                className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs font-semibold shadow-sm shrink-0"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                <span className="truncate max-w-[80px] sm:max-w-[110px]">{currentUser.displayName?.split(' ')[0] || currentUser.email?.split('@')[0] || 'লগইন'}</span>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={isSubmittingLogin}
-                title="Google লিংক করে অ্যাকাউন্ট ক্রিয়েট/লগইন করুন"
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition border border-indigo-400/30 flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-900/30 shrink-0 active:scale-95"
-              >
-                <Globe className="w-3.5 h-3.5 text-indigo-200 shrink-0" />
-                <span>Google লিংক</span>
-              </button>
-            )}
-
-            {/* Fullscreen Toggle Button */}
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              title={isBrowserFullscreen ? 'ফুলস্ক্রিন বন্ধ করুন' : 'বড় স্ক্রিন (Fullscreen)'}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white p-1.5 sm:p-2 rounded-xl border border-slate-700 transition cursor-pointer hidden md:flex items-center justify-center shrink-0"
-            >
-              {isBrowserFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-            </button>
-            
-            {activeView === 'admin-dashboard' ? (
-              <button 
-                type="button"
-                onClick={() => setActiveView('user')} 
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition border border-slate-700 flex items-center gap-1.5 cursor-pointer shrink-0"
-              >
-                <Tv className="w-3.5 h-3.5" />
-                <span>ইউজার ভিউ</span>
-              </button>
-            ) : (
-              <button 
-                type="button"
-                onClick={() => {
-                  if (isAdmin && adminToken) {
-                    setActiveView('admin-dashboard');
-                  } else {
-                    setAdminPass('');
-                    setLoginError('');
-                    setIsAdminPasswordModalOpen(true);
-                  }
-                }} 
-                className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition border flex items-center gap-1.5 cursor-pointer shrink-0 ${
-                  activeView === 'admin-login' || isAdminPasswordModalOpen
-                    ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' 
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
-                }`}
-              >
-                <ShieldAlert className="w-3.5 h-3.5 text-indigo-400" />
-                <span>{isAdmin ? 'ড্যাশবোর্ড' : 'এডমিন'}</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
+      {/* MODERN TOP NAVBAR & HORIZONTAL NAVIGATION TABS (Replacing Bottom Nav) */}
+      <TopNavBar
+        activeTab={navTab}
+        onChangeTab={handleTabChange}
+        unreadNotificationsCount={notifications.filter(n => !n.read).length}
+        userAvatarUrl={currentUser?.photoURL || undefined}
+        userName={currentUser?.displayName || wallet.userName}
+        isLoggedIn={!!currentUser}
+        walletPoints={wallet.points || 0}
+        currentUser={currentUser}
+        isAdmin={isAdmin}
+        adminToken={adminToken}
+        activeView={activeView}
+        isBrowserFullscreen={isBrowserFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        onOpenUpload={(type) => {
+          setUploadMediaType(type);
+          setIsUploadOpen(true);
+        }}
+        onOpenWallet={() => {
+          setActiveView(activeView === 'wallet' ? 'user' : 'wallet');
+        }}
+        onOpenAdmin={() => {
+          if (isAdmin && adminToken) {
+            setActiveView('admin-dashboard');
+          } else {
+            setAdminPass('');
+            setLoginError('');
+            setIsAdminPasswordModalOpen(true);
+          }
+        }}
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onGoogleLogin={handleGoogleLogin}
+        onLogoClick={() => {
+          setActiveView('user');
+          setNavTab('home');
+          setVideoFilter('all');
+          setSearchQuery('');
+        }}
+        isSubmittingLogin={isSubmittingLogin}
+      />
 
       {/* Screen Wake Lock & Permanent Cloud Database Status Banner */}
       <div className="bg-slate-900 border-b border-slate-800/80 px-4 py-2">
@@ -2971,43 +2884,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Permanent Storage Notice Banner */}
-            <div className="bg-gradient-to-r from-emerald-950/40 via-indigo-950/30 to-slate-900 border border-emerald-500/30 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-emerald-300 font-semibold text-sm">
-                  <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                  <span>ক্লাউড পার্মানেন্ট ডাটাবেজ সুরক্ষার নিয়মাবলী:</span>
-                </div>
-                <p className="text-slate-300 text-xs leading-relaxed max-w-3xl">
-                  <strong>১. স্থায়ীভাবে সংরক্ষিত:</strong> এখানে আপলোড করা প্রতিটি ভিডিও এবং ফটো লিংক Google Firebase ক্লাউড ডাটাবেজে চিরস্থায়ীভাবে সংরক্ষিত থাকে। কোনো লিংকই কখনো আপনি-আপনি বা স্বয়ংক্রিয়ভাবে মুছে যাবে না।<br />
-                  <strong>২. কেবল এডমিন ডিলিট করতে পারেন:</strong> সাধারণ ইউজাররা ডিলিট করতে পারবেন না। শুধুমাত্র এডমিন প্যানেল থেকে অনুমোদিত ইউজাররাই অপ্রয়োজনীয় কনটেন্ট মুছে ফেলতে পারবেন।<br />
-                  <strong>৩. রিয়েল-টাইম সিঙ্ক:</strong> যেকোনো একজন ইউজার লিংক আপলোড করলেই সাথে সাথে সকল ব্যবহারকারীর স্ক্রিনে নতুন ভিডিও বা ফটো চলে আসে।
-                </p>
-              </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => {
-                    setUploadMediaType('video');
-                    setIsUploadOpen(true);
-                  }}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-md flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  ভিডিও দিন
-                </button>
-                <button
-                  onClick={() => {
-                    setUploadMediaType('image');
-                    setIsUploadOpen(true);
-                  }}
-                  className="bg-amber-600 hover:bg-amber-500 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-md flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ImageIcon className="w-3.5 h-3.5" />
-                  ফটো দিন
-                </button>
-              </div>
-            </div>
 
             {/* Media Grid loading state */}
             {isLoading ? (
@@ -4574,6 +4451,42 @@ export default function App() {
         </div>
       )}
 
+      {/* SETTINGS & ACTION MODAL (Triggered via Single Settings Icon ⚙️ on top right header) */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        currentUser={currentUser}
+        wallet={wallet}
+        isAdmin={isAdmin}
+        adminToken={adminToken}
+        activeView={activeView}
+        isBrowserFullscreen={isBrowserFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        onOpenUpload={(type) => {
+          setUploadMediaType(type);
+          setIsUploadOpen(true);
+        }}
+        onOpenWallet={() => {
+          setActiveView(activeView === 'wallet' ? 'user' : 'wallet');
+        }}
+        onOpenAdmin={() => {
+          if (isAdmin && adminToken) {
+            setActiveView('admin-dashboard');
+          } else {
+            setAdminPass('');
+            setLoginError('');
+            setIsAdminPasswordModalOpen(true);
+          }
+        }}
+        onGoogleLogin={handleGoogleLogin}
+        onLogout={handleLogout}
+        onNavigateToProfile={() => {
+          setNavTab('profile');
+          setProfileTargetUserId(currentUser?.uid || wallet.userId);
+        }}
+        isSubmittingLogin={isSubmittingLogin}
+      />
+
       {/* SECURE ADMIN PASSWORD MODAL GATE (Strict ruhulamin0 verification) */}
       <AdminPasswordModal
         isOpen={isAdminPasswordModalOpen}
@@ -4596,15 +4509,7 @@ export default function App() {
         />
       )}
 
-      {/* FIXED BOTTOM NAVIGATION BAR (Permanently visible across all screens) */}
-      <BottomNavBar
-        activeTab={navTab}
-        onChangeTab={handleTabChange}
-        unreadNotificationsCount={notifications.filter(n => !n.read).length}
-        userAvatarUrl={currentUser?.photoURL || undefined}
-        userName={currentUser?.displayName || wallet.userName}
-        isLoggedIn={!!currentUser}
-      />
+
 
     </div>
   );

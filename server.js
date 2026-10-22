@@ -53683,6 +53683,19 @@ try {
 } catch (fbErr) {
   console.warn("\u26A0\uFE0F [Server] Firebase Firestore server init notice:", fbErr);
 }
+function sanitizeFirestoreData(obj) {
+  const result = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== void 0) {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        result[k] = sanitizeFirestoreData(v);
+      } else {
+        result[k] = v;
+      }
+    }
+  }
+  return result;
+}
 async function syncVideoToFirestore(video) {
   if (!firestoreDb) return;
   try {
@@ -53694,12 +53707,13 @@ async function syncVideoToFirestore(video) {
       date: video.date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
       uploader: (video.uploader || "RUHUL MIDIA").substring(0, 100),
       uploaderId: video.uploaderId ? String(video.uploaderId).substring(0, 128) : "server_tg",
-      createdAt: video.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
-      thumbnailUrl: video.thumbnailUrl || void 0,
-      durationSeconds: typeof video.durationSeconds === "number" ? video.durationSeconds : void 0,
-      durationFormatted: video.durationFormatted || void 0
+      createdAt: video.createdAt || (/* @__PURE__ */ new Date()).toISOString()
     };
-    await setDoc(doc(firestoreDb, "videos", String(video.id)), validVideo, { merge: true });
+    if (video.thumbnailUrl) validVideo.thumbnailUrl = video.thumbnailUrl;
+    if (typeof video.durationSeconds === "number") validVideo.durationSeconds = video.durationSeconds;
+    if (video.durationFormatted) validVideo.durationFormatted = video.durationFormatted;
+    if (video.isShort !== void 0) validVideo.isShort = video.isShort;
+    await setDoc(doc(firestoreDb, "videos", String(video.id)), sanitizeFirestoreData(validVideo), { merge: true });
     console.log(`[Firestore Sync] Video ${video.id} synced successfully`);
   } catch (err) {
     console.warn("[Firestore Sync] Video sync error:", err);
@@ -53717,24 +53731,26 @@ async function deleteVideoFromFirestore(videoId) {
 async function syncWalletToFirestore(wallet) {
   if (!firestoreDb || !wallet.userId) return;
   try {
-    await setDoc(doc(firestoreDb, "wallets", wallet.userId), {
+    const walletDoc = {
       userId: wallet.userId,
       userName: wallet.userName || "\u0987\u0989\u099C\u09BE\u09B0",
-      userEmail: wallet.userEmail || void 0,
       points: wallet.points ?? 0,
       totalEarned: wallet.totalEarned ?? wallet.points ?? 0,
       totalWithdrawn: wallet.totalWithdrawn ?? 0,
       videosWatchedCount: wallet.videosWatchedCount ?? 0,
       lastActive: wallet.lastActive || (/* @__PURE__ */ new Date()).toISOString()
-    }, { merge: true });
-    await setDoc(doc(firestoreDb, "users", wallet.userId), {
+    };
+    if (wallet.userEmail) walletDoc.userEmail = wallet.userEmail;
+    await setDoc(doc(firestoreDb, "wallets", wallet.userId), sanitizeFirestoreData(walletDoc), { merge: true });
+    const userDoc = {
       userId: wallet.userId,
       userName: wallet.userName || "\u0987\u0989\u099C\u09BE\u09B0",
-      userEmail: wallet.userEmail || void 0,
       online: true,
       lastActive: Date.now(),
       lastSeen: (/* @__PURE__ */ new Date()).toLocaleTimeString("bn-BD")
-    }, { merge: true });
+    };
+    if (wallet.userEmail) userDoc.userEmail = wallet.userEmail;
+    await setDoc(doc(firestoreDb, "users", wallet.userId), sanitizeFirestoreData(userDoc), { merge: true });
     console.log(`[Firestore Sync] Wallet & User ${wallet.userId} synced to Firestore`);
   } catch (err) {
     console.warn("[Firestore Sync] Wallet sync error:", err);

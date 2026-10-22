@@ -63,3 +63,18 @@
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
 }
+
+/* Prevent Netlify or third-party badge overlays from blocking the bottom navigation */
+.netlify-badge,
+[data-netlify-deploy-id],
+#netlify-badge,
+iframe[src*="netlify"],
+div[id*="netlify"],
+div[class*="netlify-badge"] {
+  display: none !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  z-index: -9999 !important;
+}
+

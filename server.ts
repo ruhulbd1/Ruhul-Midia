@@ -29,6 +29,7 @@ interface Video {
   thumbnailUrl?: string;
   durationSeconds?: number;
   durationFormatted?: string;
+  isShort?: boolean;
 }
 
 interface AdSettings {
@@ -227,11 +228,25 @@ try {
   console.warn('⚠️ [Server] Firebase Firestore server init notice:', fbErr);
 }
 
+function sanitizeFirestoreData<T extends Record<string, any>>(obj: T): T {
+  const result: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        result[k] = sanitizeFirestoreData(v);
+      } else {
+        result[k] = v;
+      }
+    }
+  }
+  return result as T;
+}
+
 // 1. Sync Video to Firestore
 async function syncVideoToFirestore(video: Video) {
   if (!firestoreDb) return;
   try {
-    const validVideo = {
+    const validVideo: Record<string, any> = {
       id: String(video.id),
       title: String(video.title || '').substring(0, 300),
       url: String(video.url || '').substring(0, 2048),
@@ -239,12 +254,14 @@ async function syncVideoToFirestore(video: Video) {
       date: video.date || new Date().toISOString().split('T')[0],
       uploader: (video.uploader || 'RUHUL MIDIA').substring(0, 100),
       uploaderId: video.uploaderId ? String(video.uploaderId).substring(0, 128) : 'server_tg',
-      createdAt: video.createdAt || new Date().toISOString(),
-      thumbnailUrl: video.thumbnailUrl || undefined,
-      durationSeconds: typeof video.durationSeconds === 'number' ? video.durationSeconds : undefined,
-      durationFormatted: video.durationFormatted || undefined
+      createdAt: video.createdAt || new Date().toISOString()
     };
-    await setDoc(doc(firestoreDb, 'videos', String(video.id)), validVideo, { merge: true });
+    if (video.thumbnailUrl) validVideo.thumbnailUrl = video.thumbnailUrl;
+    if (typeof video.durationSeconds === 'number') validVideo.durationSeconds = video.durationSeconds;
+    if (video.durationFormatted) validVideo.durationFormatted = video.durationFormatted;
+    if (video.isShort !== undefined) validVideo.isShort = video.isShort;
+
+    await setDoc(doc(firestoreDb, 'videos', String(video.id)), sanitizeFirestoreData(validVideo), { merge: true });
     console.log(`[Firestore Sync] Video ${video.id} synced successfully`);
   } catch (err) {
     console.warn('[Firestore Sync] Video sync error:', err);
@@ -266,26 +283,30 @@ async function deleteVideoFromFirestore(videoId: string) {
 async function syncWalletToFirestore(wallet: Wallet) {
   if (!firestoreDb || !wallet.userId) return;
   try {
-    await setDoc(doc(firestoreDb, 'wallets', wallet.userId), {
+    const walletDoc: Record<string, any> = {
       userId: wallet.userId,
       userName: wallet.userName || 'ইউজার',
-      userEmail: wallet.userEmail || undefined,
       points: wallet.points ?? 0,
       totalEarned: wallet.totalEarned ?? wallet.points ?? 0,
       totalWithdrawn: wallet.totalWithdrawn ?? 0,
       videosWatchedCount: wallet.videosWatchedCount ?? 0,
       lastActive: wallet.lastActive || new Date().toISOString()
-    }, { merge: true });
+    };
+    if (wallet.userEmail) walletDoc.userEmail = wallet.userEmail;
+
+    await setDoc(doc(firestoreDb, 'wallets', wallet.userId), sanitizeFirestoreData(walletDoc), { merge: true });
 
     // Also mirror to 'users' collection so presence and user list reflects activity
-    await setDoc(doc(firestoreDb, 'users', wallet.userId), {
+    const userDoc: Record<string, any> = {
       userId: wallet.userId,
       userName: wallet.userName || 'ইউজার',
-      userEmail: wallet.userEmail || undefined,
       online: true,
       lastActive: Date.now(),
       lastSeen: new Date().toLocaleTimeString('bn-BD')
-    }, { merge: true });
+    };
+    if (wallet.userEmail) userDoc.userEmail = wallet.userEmail;
+
+    await setDoc(doc(firestoreDb, 'users', wallet.userId), sanitizeFirestoreData(userDoc), { merge: true });
     console.log(`[Firestore Sync] Wallet & User ${wallet.userId} synced to Firestore`);
   } catch (err) {
     console.warn('[Firestore Sync] Wallet sync error:', err);

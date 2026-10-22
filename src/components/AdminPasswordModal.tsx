@@ -58,8 +58,8 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({
 
     // Strict client-side verification against ruhulamin0
     if (trimmed !== HARDCODED_ADMIN_PASSWORD) {
-      setError('ভুল পাসওয়ার্ড! এডমিন প্যানেলে প্রবেশের জন্য সঠিক পাসওয়ার্ড (ruhulamin0) লিখুন।');
-      showToast('ভুল এডমিন পাসওয়ার্ড! সঠিক পাসওয়ার্ড দিন।', 'error');
+      setError('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।');
+      showToast('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।', 'error');
       return;
     }
 
@@ -77,8 +77,8 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({
         setPassword('');
         setError('');
       } else {
-        setError(data.error || 'অননুমোদিত অ্যাক্সেস: পাসওয়ার্ড সঠিক নয়।');
-        showToast('এডমিন যাচাই ব্যর্থ হয়েছে', 'error');
+        setError(data.error || 'ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।');
+        showToast('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।', 'error');
       }
     } catch (err) {
       console.warn('Network issue on admin login, verifying hardcoded password offline:', err);
@@ -88,8 +88,8 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({
         setPassword('');
         setError('');
       } else {
-        setError('ভুল পাসওয়ার্ড! সঠিক এডমিন পাসওয়ার্ড দিন।');
-        showToast('এডমিন যাচাই ব্যর্থ হয়েছে', 'error');
+        setError('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।');
+        showToast('ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিয়ে পুনরায় চেষ্টা করুন।', 'error');
       }
     } finally {
       setIsSubmitting(false);
