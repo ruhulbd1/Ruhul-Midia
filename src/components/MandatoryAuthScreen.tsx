@@ -1,19 +1,21 @@
 import React, { useState } from 'react';
 import { 
-  UserCheck, 
-  Mail, 
+  Tv, 
   Lock, 
+  Mail, 
   User, 
   Eye, 
   EyeOff, 
   Sparkles, 
-  ShieldCheck, 
-  Coins, 
-  ArrowRight, 
-  Tv, 
-  AlertCircle,
-  Loader2,
-  CheckCircle2
+  AlertCircle, 
+  Loader2, 
+  CheckCircle2, 
+  ArrowRight,
+  Coins,
+  ShieldCheck,
+  UserCheck,
+  Smartphone,
+  X
 } from 'lucide-react';
 import { 
   auth, 
@@ -25,14 +27,20 @@ import {
   setPersistence,
   browserLocalPersistence
 } from '../firebase';
-import { User as FirebaseUser } from 'firebase/auth';
+import { type User as FirebaseUser } from 'firebase/auth';
 
 interface MandatoryAuthScreenProps {
   onAuthSuccess: (user: FirebaseUser) => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
   isAndroidWebView?: boolean;
   isTelegram?: boolean;
-  telegramUser?: { id: number; first_name: string; last_name?: string; username?: string; photo_url?: string } | null;
+  telegramUser?: {
+    id: number;
+    first_name: string;
+    last_name?: string;
+    username?: string;
+    photo_url?: string;
+  } | null;
 }
 
 export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
@@ -50,10 +58,14 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // APK In-App Direct Login Modal State (avoiding window.prompt)
+  const [showApkPrompt, setShowApkPrompt] = useState(false);
+  const [apkInputName, setApkInputName] = useState('');
+
   // 1. Google 1-Click Sign-In (Optimized for Web & Mobile APK)
   const handleGoogleSignIn = async () => {
     // If running in Capacitor / Android WebView where embedded popups are restricted
-    const isMobileApp = isAndroidWebView || /Android|iPhone|iPad/i.test(navigator.userAgent) && window.location.href.includes('localhost');
+    const isMobileApp = isAndroidWebView || (/Android|iPhone|iPad/i.test(navigator.userAgent) && window.location.href.includes('localhost'));
     
     if (isMobileApp) {
       handleApkDirectLogin();
@@ -84,7 +96,8 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
       } else if (
         errCode === 'auth/disallowed-useragent' || 
         errCode.includes('missing-initial-state') ||
-        errCode.includes('storage')
+        errCode.includes('storage') ||
+        errCode.includes('popup-blocked')
       ) {
         // Fallback for WebView / Private mode restriction
         handleApkDirectLogin();
@@ -156,20 +169,26 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
     }
   };
 
-  // 3. Fallback for Android WebView & Telegram
+  // 3. Fallback for Android WebView & Telegram (Smooth In-App Prompt)
   const handleApkDirectLogin = () => {
-    const promptName = window.prompt('আপনার নাম বা মোবাইল নাম্বার দিন:', name || 'ইউজার');
-    if (promptName && promptName.trim()) {
-      const clean = promptName.trim();
-      const fakeUser = {
-        uid: `apk_user_${Date.now()}`,
-        displayName: clean,
-        email: clean.includes('@') ? clean : `${clean}@ruhulmidia.local`,
-        photoURL: null
-      } as unknown as FirebaseUser;
-      showToast(`স্বাগতম ${clean}! APK সেশন সফলভাবে যুক্ত হয়েছে।`, 'success');
-      onAuthSuccess(fakeUser);
+    if (name && name.trim()) {
+      submitApkLogin(name.trim());
+    } else {
+      setShowApkPrompt(true);
     }
+  };
+
+  const submitApkLogin = (inputName: string) => {
+    const clean = inputName.trim() || 'ইউজার';
+    const fakeUser = {
+      uid: `apk_user_${Date.now()}`,
+      displayName: clean,
+      email: clean.includes('@') ? clean : `${clean}@ruhulmidia.local`,
+      photoURL: null
+    } as unknown as FirebaseUser;
+    showToast(`স্বাগতম ${clean}! APK সেশন সফলভাবে যুক্ত হয়েছে।`, 'success');
+    setShowApkPrompt(false);
+    onAuthSuccess(fakeUser);
   };
 
   const handleTelegramDirectLogin = () => {
@@ -203,7 +222,7 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
             RUHUL MIDIA
           </h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            ভিডিও শেয়ারিং এবং অ্যাড ম্যানেজমেন্ট প্ল্যাটফর্ম
+            ভিডিও শেয়ারিং এবং অ্যাপ প্ল্যাটফর্ম
           </p>
           <div className="inline-flex items-center gap-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs px-3 py-1 rounded-full font-medium mt-1">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -237,6 +256,18 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
             >
               <UserCheck className="w-4 h-4" />
               <span>টেলিগ্রাম অ্যাকাউন্ট দিয়ে প্রবেশ করুন (@{telegramUser.username || telegramUser.first_name})</span>
+            </button>
+          )}
+
+          {/* Quick APK/Mobile Direct Access Button */}
+          {(isAndroidWebView || window.location.href.includes('localhost')) && (
+            <button
+              type="button"
+              onClick={handleApkDirectLogin}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white py-2.5 px-4 rounded-xl transition flex items-center justify-center gap-2 text-xs font-semibold border border-slate-700 cursor-pointer"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+              <span>APK মোবাইল ডিরেক্ট প্রবেশ (Popup ছাড়া)</span>
             </button>
           )}
         </div>
@@ -385,6 +416,54 @@ export const MandatoryAuthScreen: React.FC<MandatoryAuthScreenProps> = ({
         </div>
 
       </div>
+
+      {/* APK Mobile Direct Name Input Modal (Fallback without window.prompt) */}
+      {showApkPrompt && (
+        <div className="fixed inset-0 z-60 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-indigo-400" />
+                <span>মোবাইল ডিরেক্ট প্রবেশ</span>
+              </h3>
+              <button 
+                type="button"
+                onClick={() => setShowApkPrompt(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-400">
+              আপনার নাম অথবা মোবাইল নাম্বার প্রবেশ করিয়ে সরাসরি অ্যাপে প্রবেশ করুন:
+            </p>
+            <input
+              type="text"
+              value={apkInputName}
+              onChange={(e) => setApkInputName(e.target.value)}
+              placeholder="আপনার নাম বা নাম্বার"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => submitApkLogin(apkInputName || 'ইউজার')}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-xl text-xs"
+              >
+                প্রবেশ করুন
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowApkPrompt(false)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 py-2.5 px-4 rounded-xl text-xs"
+              >
+                বাতিল
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

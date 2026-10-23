@@ -17,7 +17,8 @@ import {
   Minimize2
 } from 'lucide-react';
 import { type User } from 'firebase/auth';
-import { type NavTabType } from './BottomNavBar';
+
+export type NavTabType = 'home' | 'reels' | 'social' | 'notifications' | 'profile';
 
 interface TopNavBarProps {
   activeTab: NavTabType;

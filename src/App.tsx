@@ -111,8 +111,7 @@ import WatchEarnTracker from './components/WatchEarnTracker';
 import MobileStreamingView from './components/MobileStreamingView';
 import { useUserPresence } from './hooks/useUserPresence';
 import { type UserPresence } from './types/userPresence';
-import { type NavTabType } from './components/BottomNavBar';
-import TopNavBar from './components/TopNavBar';
+import TopNavBar, { type NavTabType } from './components/TopNavBar';
 import { SocialCommunityView } from './components/SocialCommunityView';
 import { UserProfileView } from './components/UserProfileView';
 import { NotificationsView } from './components/NotificationsView';
@@ -2511,7 +2510,7 @@ export default function App() {
   }
 
   return (
-    <div className="bg-slate-950 text-slate-100 min-h-screen pb-10 flex flex-col justify-between font-sans selection:bg-indigo-500 selection:text-white relative overflow-x-hidden w-full">
+    <div className="bg-slate-950 text-slate-100 min-h-screen pb-10 flex flex-col justify-between font-sans selection:bg-indigo-500 selection:text-white relative overflow-x-hidden w-full overflow-y-auto smooth-scroll">
       
       {/* Toast Notifications */}
       <div className="fixed top-24 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
